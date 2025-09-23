@@ -37,6 +37,7 @@ body{
     display: flex;
     font-size: 30px;
     margin-bottom: 16px;
+    gap: 100px;
 }
 
 #courses-section {
