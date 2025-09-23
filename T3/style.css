@@ -10,6 +10,7 @@ body{
 }
 
 .navbar li {
+    list-style-type: none;
   margin-right: 24px;
 }
 
@@ -21,6 +22,7 @@ body{
 
 .hero-container {
     display: flex;
+    flex-direction: column;
     gap: 100px;
     align-items: center;
 }
@@ -28,15 +30,18 @@ body{
 #hero-section{
     display: flex;
     flex-direction: column;
+    align-items: center;
 }
 
 #hero{
+    display: flex;
     font-size: 30px;
+    margin-bottom: 16px;
 }
 
 #courses-section {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     align-items: center;
     font-size: 15px;
 }
