@@ -1,0 +1,130 @@
+#!/usr/bin/env node
+'use strict';
+
+const data = [
+  {
+    title: "Buy groceries",
+    description: "Milk, Bread, Eggs, Butter",
+    completed: false
+  },
+  {
+    title: "Walk the dog",
+    description: "Take Bella for a walk in the park",
+    completed: true
+  },
+  {
+    title: "Read a book",
+    description: "Finish reading 'The Great Gatsby'",
+    completed: false
+  },
+  { 
+    "id" : 3,
+    "title": "NEW THING", 
+    "description": "Gotta do the new thing!", 
+    "completed": false 
+}
+]
+
+const port = (() => {
+    const args = process.argv;
+
+    if (args.length !== 3) {
+        console.error("usage: node index.js port");
+        process.exit(1);
+    }
+
+    const num = parseInt(args[2], 10);
+    if (isNaN(num)) {
+        console.error("error: argument must be an integer.");
+        process.exit(1);
+    }
+
+    return num;
+})();
+const express = require("express");
+const app = express();
+app.use(express.json());
+
+app.get("/", (req, res) => {
+    res.send("Hello World!");
+});
+
+app.get("/notes", (req, res) => {
+    const {done} = req.query;
+
+    if (done == "true"){
+            const completedNotes = data.filter(note => note.completed === true);
+        res.json(completedNotes);
+    } else if (done === "false") {
+        const incompleteNotes = data.filter(note => note.completed === false);
+        res.json(incompleteNotes);
+    } else {
+        res.json(data);
+  }
+});
+
+app.get("/notes/:noteId", (req, res) => {
+    const noteId = Number(req.params.noteId);
+    if (!Number.isInteger(noteId)) {
+        return res.status(400).send("Bad request");
+    }
+
+    if (noteId < 0 || noteId >= data.length) {
+        return res.status(404).send("Not found");
+    }
+    res.json(data[req.params["noteId"]]);
+    
+});
+
+app.post("/notes", (req, res) => {
+    console.log(req.body)
+    data.push(req.body);
+    const {done} = req.query;
+
+    if (done == "true"){
+            const completedNotes = data.filter(note => note.completed === true);
+        res.json(completedNotes);
+    } else if (done === "false") {
+        const incompleteNotes = data.filter(note => note.completed === false);
+        res.json(incompleteNotes);
+    } else {
+        res.json(data);
+  }
+
+  res.status(201).json(newNote);
+});
+
+app.patch("/notes/:noteId", (req, res) => {
+  const noteId = Number(req.params.noteId);
+
+  if (!Number.isInteger(noteId)) {
+    return res.status(400).send("Bad request");
+  }
+
+  if (noteId < 0 || noteId >= data.length) {
+    return res.status(404).send("Not found");
+  }
+
+  const { done } = req.query;
+
+  if (done !== "true" && done !== "false") {
+    return res.status(400).send("Bad request");
+  }
+
+  data[noteId].completed = (done === "true");
+
+  const { title, description, completed } = data[noteId];
+  res.status(200).json({ title, description, completed });
+});
+
+
+// ==================
+
+const server = app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+});
+
+server.on('error', (err) => {
+    console.error(`cannot start server: ${err.message}`);
+    process.exit(1);
+});
