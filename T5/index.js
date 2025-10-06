@@ -44,17 +44,21 @@ app.get("/", (req, res) => {
 });
 
 app.get("/notes", (req, res) => {
-    const {done} = req.query;
+    const { done } = req.query;
 
-    if (done == "true"){
-            const completedNotes = data.filter(note => note.completed === true);
-        res.json(completedNotes);
-    } else if (done === "false") {
-        const incompleteNotes = data.filter(note => note.completed === false);
-        res.json(incompleteNotes);
-    } else {
-        res.json(data);
-  }
+    if (done === "true") {
+        return res.json(data.filter(n => n.completed === true));
+    }
+
+    if (done === "false") {
+        return res.json(data.filter(n => n.completed === false));
+    }
+
+    if (done !== undefined) {
+        return res.status(400).send("Bad request");
+    }
+
+    res.json(data);
 });
 
 app.get("/notes/:noteId", (req, res) => {
