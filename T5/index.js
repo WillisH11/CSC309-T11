@@ -17,12 +17,6 @@ const data = [
     description: "Finish reading 'The Great Gatsby'",
     completed: false
   },
-  { 
-    "id" : 3,
-    "title": "NEW THING", 
-    "description": "Gotta do the new thing!", 
-    "completed": false 
-}
 ]
 
 const port = (() => {
@@ -72,26 +66,25 @@ app.get("/notes/:noteId", (req, res) => {
     if (noteId < 0 || noteId >= data.length) {
         return res.status(404).send("Not found");
     }
-    res.json(data[req.params["noteId"]]);
-    
+
+    res.json(data[noteId]);
+ 
 });
 
 app.post("/notes", (req, res) => {
     console.log(req.body)
+
+    if (!req.body || typeof req.body !== "object") {
+        return res.status(400).send("Bad request");
+    }
+
     data.push(req.body);
-    const {done} = req.query;
+    const newId = data.length - 1;
 
-    if (done == "true"){
-            const completedNotes = data.filter(note => note.completed === true);
-        res.json(completedNotes);
-    } else if (done === "false") {
-        const incompleteNotes = data.filter(note => note.completed === false);
-        res.json(incompleteNotes);
-    } else {
-        res.json(data);
-  }
+    const responseNote = structuredClone(req.body);
+    responseNote.id = newId;
 
-  res.status(201).json(newNote);
+    res.status(201).json(responseNote);
 });
 
 app.patch("/notes/:noteId", (req, res) => {
