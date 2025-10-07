@@ -49,6 +49,8 @@ a[href^="mailto:"] {
   gap: 2rem;
   justify-content: flex-start;
   align-items: center;
+  margin: 0;
+  padding: 0;
 }
 
 .nav-link {
@@ -56,7 +58,12 @@ a[href^="mailto:"] {
   color: #00b8d4;
   font-weight: 400;
   text-decoration: none;
-  margin-left: 0.5rem;
+  margin-left: 0;
+  line-height: 1;
+}
+
+.nav-link:first-child {
+  margin-left: 2rem;
 }
 
 .nav-link.active {
@@ -116,13 +123,13 @@ a[href^="mailto:"] {
 /* ===== index page ===== */
 .intro-title {
   margin: 0 0 16px;
-  font-size: 2.5rem;
+  font-size: 20px;
   font-weight: 700;
 }
 
 .intro-subtitle {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 16px;
   color: #374151;
 }
 
