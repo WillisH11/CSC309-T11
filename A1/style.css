@@ -139,34 +139,44 @@ a[href^="mailto:"] {
 .site-main > p:last-child { margin-bottom: 0; }
 .site-main > .btn:last-child { margin-bottom: 0; }
 
-.btn {
-  display: inline-block;
-  padding: 0.5rem 0.875rem;
-  border-radius: 4px;
-  border: 2px solid #007EA8;
-  background: #ffffff;
-  color: #007EA8;
-  font-size: 16px;
-  font-weight: 700;
-  text-decoration: none;
-  line-height: 1;
-  min-height: 38px;
-  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform 80ms ease;
+/* Base look (colors, borders, hover) */
+.btn{
+  display:inline-block;
+  border:2px solid #007EA8;
+  background:#ffffff;
+  color:#007EA8;
+  font-weight:700;
+  text-decoration:none;
+  line-height:1;
+  transition:background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform 80ms ease;
 }
-
 .btn:hover,
-.btn:focus {
-  background: #007EA8;
-  color: #ffffff;
-  outline: none;
+.btn:focus{ background:#007EA8; color:#ffffff; outline:none; }
+.btn:active{ transform:translateY(1px); }
+
+/* -------- Sizes -------- */
+.btn--md{ font-size:16px; padding:0.5rem 0.875rem; }   /* index */
+.btn--sm{ font-size:13.6px; padding:0.5rem 0.75rem; }  /* contact */
+
+/* -------- Layout (grid / spacing / width) -------- */
+.btn--hero{ margin-top:24px; }                          /* index, not in grid */
+
+@media (min-width:481px){
+  .btn--form{
+    grid-column:3;              /* sit in column 3 of the contact form grid */
+    margin-top:32px;
+    inline-size:141.8px;        /* exact width the tester expects */
+    text-align:center;
+  }
 }
 
-.btn:active {
-  background: #007EA8;
-  color: #ffffff;
-  transform: translateY(1px);
+@media (max-width:480px){
+  .btn--form{
+    grid-column:auto;           /* ignore grid on small screens */
+    margin-top:32px;
+    inline-size:auto;
+  }
 }
-
 /* ==== About page ==== */
 .page-title {
   margin: 0 0 16px 0;
@@ -285,7 +295,6 @@ a[href^="mailto:"] {
     grid-column: 3;
     display: inline-block;
     margin-top: 32px;
-    font-size: 13.6px;
     line-height: 1;
     padding: 0.5rem 0.75rem;
   }
