@@ -63,7 +63,7 @@ a[href^="mailto:"] {
 }
 
 .nav-link:first-child {
-  margin-left: 1rem;
+  margin-left: 24px;
 }
 
 .nav-link.active {
@@ -133,6 +133,12 @@ a[href^="mailto:"] {
   color: #374151;
 }
 
+.intro-subtitle + .btn { margin-top: 24px; }
+.intro-subtitle + p { margin-top: 24px; }
+
+.site-main > p:last-child { margin-bottom: 0; }
+.site-main > .btn:last-child { margin-bottom: 0; }
+
 .btn {
   display: inline-block;
   padding: 0.5rem 0.875rem;
@@ -171,7 +177,7 @@ a[href^="mailto:"] {
 .classes > summary,
 .Course-taken {
   cursor: pointer;
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
 }
 
@@ -184,7 +190,7 @@ a[href^="mailto:"] {
 }
 
 .academic-code {
-  padding: 0.5rem;
+  padding: 24px;
   margin: 0 0 16px 0;
 }
 
@@ -206,9 +212,12 @@ a[href^="mailto:"] {
 
 /* ==== Contact page ==== */
 .contact-name {
-  margin: 0 0 16px 0;
+  margin: 0;
   font-size: 48px;
   font-weight: 700;
+}
+.contact-name + .contact-email {
+  margin-top: 16px !important;
 }
 
 .contact-email { margin: 0; }
@@ -219,6 +228,10 @@ a[href^="mailto:"] {
   font-weight: 700;
 }
 
+.contact-email + .feedback-form {
+  margin-top: 24px !important;
+}
+
 .feedback-form {
   margin-left: 0.5rem;
   margin-right: 0.5rem;
@@ -227,12 +240,23 @@ a[href^="mailto:"] {
   display: grid;
   gap: 1rem;
   text-align: left;
+  align-self: stretch;
 }
 
 .form-label {
   font-weight: 700;
-  display: block;
-  margin-bottom: 0.25rem;
+  display: inline-block;
+  width: 200px;
+  margin: 0;
+  vertical-align: middle;
+}
+.form-label + input[type="email"],
+.form-label + textarea,
+.form-label + input[type="file"] {
+  display: inline-block;
+  width: calc(100% - 200px - 16px);
+  margin-left: 16px;
+  vertical-align: middle;
 }
 
 .form-control,
@@ -250,18 +274,40 @@ textarea {
 .consent-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 18px;
   margin-top: 32px;
 }
-
 .checkbox-large {
   transform: scale(1.5);
   transform-origin: left center;
 }
+.consent-row label { margin-left: 0; }
 
-.consent-row label { margin-left: -4px; }
+.feedback-form .btn {
+  margin-top: 32px;
+  font-size: 13.6px !important;
+  line-height: 1;
+}
 
-.feedback-form .btn { margin-top: 32px; font-size: 13.6px; }
+@media (max-width: 480px) {
+  .feedback-form {
+    width: 100%;
+    max-width: calc(100% - 1rem);
+    align-self: stretch;
+  }
+  .form-label {
+    display: block;
+    width: auto;
+    margin-bottom: 0.25rem;
+  }
+  .form-label + input[type="email"],
+  .form-label + textarea,
+  .form-label + input[type="file"] {
+    display: block;
+    width: 100%;
+    margin-left: 0;
+  }
+}
 
 /* ===== Footer ===== */
 .site-footer {
@@ -279,10 +325,3 @@ textarea {
 
 img, svg, video, canvas { max-width: 100%; }
 body { overflow-wrap: anywhere; }
-
-@media (max-width: 480px) {
-  .feedback-form {
-    width: 100%;
-    max-width: calc(100% - 1rem);
-  }
-}
