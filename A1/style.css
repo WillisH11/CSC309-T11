@@ -362,19 +362,20 @@ textarea {
   .site-main .feedback-form input[type="file"] { margin-bottom: 16px; }
 
   .site-main .feedback-form .consent-row {
-    margin-top: 16px;
-    padding-left: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 0;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
-    display: block;
+    position: static;
     margin: 0;
     transform: scale(1.5);
     transform-origin: left top;
   }
   .site-main .feedback-form .consent-row label {
-    display: block;
-    margin-top: 8px;
-    margin-left: 0;
+    margin: 0;
     text-align: left;
   }
 
