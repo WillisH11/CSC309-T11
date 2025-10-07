@@ -234,7 +234,7 @@ a[href^="mailto:"] {
 }
 
 .feedback-form {
-  margin: 24px 0.5rem 0 0.5rem;
+  margin: 18px 0.5rem 0 0.5rem;
   width: auto;
   max-width: none;
   display: grid;
@@ -258,7 +258,7 @@ textarea {
 /* ---------- DESKTOP (≥481px) ---------- */
 @media (min-width: 481px) {
   .site-main .feedback-form {
-    margin: 24px auto 0;
+    margin: 18px auto 0;
     display: grid;
     grid-template-columns: 200px 16px 609px;
     grid-auto-rows: max-content;
@@ -286,7 +286,7 @@ textarea {
     margin: 0;
   }
 
-  .site-main .feedback-form .form-label:nth-of-type(2) {
+  .site-main .feedback-form .form-label: nth-of-type(2) {
     position: relative;
     top: 16px;
   }
@@ -296,11 +296,11 @@ textarea {
     position: relative;
     display: block;
     margin-top: 16px;
-    padding-left: 38px;
+    padding-left: 17px;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
     position: absolute;
-    left: 0;
+    left: -21px;
     top: 0;
     transform: scale(1.5);
     transform-origin: left center;
@@ -366,15 +366,16 @@ textarea {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 8px;
+    gap: 0;
     margin-top: 16px;
+    padding-left: 17px;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
+    margin: 0 0 8px 0;
     transform: scale(1.5);
     transform-origin: left center;
-    margin: 0;
   }
-  .site-main .feedback-form .consent-row label { margin: 0; padding: 0; text-align: left; }
+  .site-main .feedback-form .consent-row label { margin: 0; }
 
   .site-main .feedback-form .consent-row + .btn,
   .site-main .feedback-form .consent-row .btn {
