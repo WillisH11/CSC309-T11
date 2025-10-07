@@ -247,7 +247,7 @@ a[href^="mailto:"] {
   width:100%;
   padding:0.8rem;
   border:1px solid #DDDDDD !important;
-  border-radius:4px !important;
+  border-radius:3px !important;
   font:inherit;
   background:#FFFFFF !important;
 }
