@@ -25,7 +25,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
-  background-color: #808080;
+  background-color: #BBBBBB;
   padding-inline: 0;
 }
 
@@ -54,7 +54,7 @@ a[href^="mailto:"] {
 }
 
 .nav-link {
-  font-size: 20px;
+  font-size: 19.2px;
   color: #00b8d4;
   font-weight: 400;
   text-decoration: none;
@@ -63,7 +63,7 @@ a[href^="mailto:"] {
 }
 
 .nav-link:first-child {
-  margin-left: 2rem;
+  margin-left: 1rem;
 }
 
 .nav-link.active {
@@ -123,13 +123,13 @@ a[href^="mailto:"] {
 /* ===== index page ===== */
 .intro-title {
   margin: 0 0 16px;
-  font-size: 20px;
+  font-size: 48px;
   font-weight: 700;
 }
 
 .intro-subtitle {
   margin: 0;
-  font-size: 16px;
+  font-size: 24px;
   color: #374151;
 }
 
@@ -164,20 +164,21 @@ a[href^="mailto:"] {
 /* ==== About page ==== */
 .page-title {
   margin: 0 0 0.75rem 0;
-  font-size: 2rem;
+  font-size: 48px;
   font-weight: 700;
 }
 
 .classes > summary,
 .Course-taken {
   cursor: pointer;
+  font-size: 24px;
   font-weight: 700;
 }
 
 .classes > ul,
 .Course-list {
   display: inline-block;
-  margin: 1rem 0 0 0;
+  margin: 20px 0 0 0;
   padding-left: 1.25rem;
   text-align: left;
 }
@@ -206,7 +207,7 @@ a[href^="mailto:"] {
 /* ==== Contact page ==== */
 .contact-name {
   margin: 0 0 16px 0;
-  font-size: 2rem;
+  font-size: 48px;
   font-weight: 700;
 }
 
@@ -214,7 +215,7 @@ a[href^="mailto:"] {
 
 .email-link {
   text-decoration: underline;
-  font-size: 1.125rem;
+  font-size: 32px;
   font-weight: 700;
 }
 
@@ -229,7 +230,7 @@ a[href^="mailto:"] {
 }
 
 .form-label {
-  font-weight: 600;
+  font-weight: 700;
   display: block;
   margin-bottom: 0.25rem;
 }
@@ -260,7 +261,7 @@ textarea {
 
 .consent-row label { margin-left: -4px; }
 
-.feedback-form .btn { margin-top: 32px; }
+.feedback-form .btn { margin-top: 32px; font-size: 13.6px; }
 
 /* ===== Footer ===== */
 .site-footer {
