@@ -225,7 +225,7 @@ a[href^="mailto:"] {
 }
 
 .contact-email {
-  margin: 16px 0 0 0;
+  margin: 10px 0 0 0;
 }
 .email-link {
   text-decoration: underline;
@@ -234,7 +234,7 @@ a[href^="mailto:"] {
 }
 
 .feedback-form {
-  margin: 24px 0.5rem 0 0.5rem;
+  margin: 18px 0.5rem 0 0.5rem;
   width: auto;
   max-width: none;
   display: grid;
@@ -258,7 +258,7 @@ textarea {
 /* ---------- DESKTOP (≥481px) ---------- */
 @media (min-width: 481px) {
   .site-main .feedback-form {
-    margin: 24px auto 0;
+    margin: 18px auto 0;
     display: grid;
     grid-template-columns: 200px 16px 609px;
     grid-auto-rows: max-content;
@@ -268,7 +268,6 @@ textarea {
     max-width: 825px;
     justify-items: stretch;
   }
-
 
   .site-main .feedback-form .form-label {
     grid-column: 1;
@@ -292,19 +291,25 @@ textarea {
     top: 16px;
   }
 
+  .site-main .feedback-form .consent-row {
+    grid-column: 3;
+    position: relative;
+    display: block;
+    margin-top: 16px;
+  }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
+    position: absolute;
+    left: -18px;
+    top: 0;
     transform: scale(1.5);
     transform-origin: left center;
-    position: relative;
-    left: -18px;
     margin: 0;
   }
   .site-main .feedback-form .consent-row label {
-    display: inline-block;
+    display: block;
     margin: 0;
     text-align: left;
   }
-
 
   .site-main .feedback-form .btn {
     grid-column: 3;
@@ -326,7 +331,6 @@ textarea {
     padding-left: 0;
     padding-right: 0;
   }
-
   .site-main .feedback-form {
     display: block;
     width: calc(100% - 1rem);
@@ -342,7 +346,6 @@ textarea {
     margin: 0 0 8px 0;
     font-weight: 700;
   }
-
   .site-main .feedback-form .form-label + input[type="email"],
   .site-main .feedback-form .form-label + textarea,
   .site-main .feedback-form .form-label + input[type="file"] {
@@ -351,23 +354,21 @@ textarea {
     margin: 0;
   }
 
-
   .site-main .feedback-form input[type="email"] + .form-label,
   .site-main .feedback-form textarea + .form-label {
     margin-top: 16px;
   }
-
   .site-main .feedback-form input[type="file"] { margin-bottom: 16px; }
 
   .site-main .feedback-form .consent-row {
     display: flex;
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
     gap: 8px;
     margin-top: 0;
   }
-  .site-main .feedback-form .consent-row input[type="checkbox"] { margin: 0; }
-  .site-main .feedback-form .consent-row label { margin: 0; padding: 0; }
+  .site-main .feedback-form .consent-row input[type="checkbox"] { margin: 0; transform: scale(1.5); transform-origin: left center; }
+  .site-main .feedback-form .consent-row label { margin: 0; }
 
   .site-main .feedback-form .consent-row + .btn,
   .site-main .feedback-form .consent-row .btn {
@@ -380,7 +381,6 @@ textarea {
     text-align: center;
   }
 }
-
 
 .checkbox-large {
   transform: scale(1.5);
