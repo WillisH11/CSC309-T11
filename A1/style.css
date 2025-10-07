@@ -25,7 +25,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
-  background-color: #f2f2f2;
+  background-color: #808080;
   padding-inline: 0;
 }
 
@@ -36,6 +36,7 @@ a[href^="mailto:"] {
 /* ===== Header (fixed) ===== */
 .site-header {
   height: 70px;
+  padding: 8px 0;
   border-bottom: 1px solid #e5e7eb;
   background: #333333;
   color: #ffffff;
@@ -51,10 +52,11 @@ a[href^="mailto:"] {
 }
 
 .nav-link {
-  font-size: 1.125rem;
+  font-size: 20px;
   color: #00b8d4;
   font-weight: 400;
   text-decoration: none;
+  margin-left: 0.5rem;
 }
 
 .nav-link.active {
@@ -81,6 +83,11 @@ a[href^="mailto:"] {
   flex: 1 0 auto;
 }
 
+.site-main > h1,
+.site-main > p {
+  align-self: stretch;
+  width: 100%;
+}
 .site-main > * { padding-inline: 0.5rem; }
 
 .site-main > .avatar { 
@@ -123,24 +130,27 @@ a[href^="mailto:"] {
   display: inline-block;
   padding: 0.5rem 0.875rem;
   border-radius: 4px;
-  border: 1px solid #111827;
+  border: 2px solid #007EA8;
   background: #ffffff;
-  color: #111827;
+  color: #007EA8;
+  font-size: 16px;
   font-weight: 700;
   text-decoration: none;
   line-height: 1;
   min-height: 38px;
-  transition: background-color 120ms ease, color 120ms ease, transform 80ms ease;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, transform 80ms ease;
 }
 
 .btn:hover,
 .btn:focus {
-  background: #111827;
+  background: #007EA8;
   color: #ffffff;
   outline: none;
 }
 
 .btn:active {
+  background: #007EA8;
+  color: #ffffff;
   transform: translateY(1px);
 }
 
