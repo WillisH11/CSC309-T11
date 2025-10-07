@@ -286,7 +286,7 @@ textarea {
     margin: 0;
   }
 
-  .site-main .feedback-form .form-label: nth-of-type(2) {
+  .site-main .feedback-form .form-label:nth-of-type(2) {
     position: relative;
     top: 16px;
   }
@@ -296,18 +296,18 @@ textarea {
     position: relative;
     display: block;
     margin-top: 16px;
-    padding-left: 17px;
+    left: 0;
+    padding-left: 0;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
     position: absolute;
-    left: -21px;
+    left: -18px;
     top: 0;
     transform: scale(1.5);
     transform-origin: left center;
     margin: 0;
   }
   .site-main .feedback-form .consent-row label {
-    display: block;
     margin: 0;
     text-align: left;
   }
@@ -366,12 +366,12 @@ textarea {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0;
+    gap: 8px;
     margin-top: 16px;
-    padding-left: 17px;
+    padding-left: 0;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
-    margin: 0 0 8px 0;
+    margin: 0;
     transform: scale(1.5);
     transform-origin: left center;
   }
@@ -393,6 +393,7 @@ textarea {
   transform: scale(1.5);
   transform-origin: left center;
 }
+
 
 /* ===== Footer ===== */
 .site-footer {
