@@ -225,7 +225,7 @@ a[href^="mailto:"] {
 }
 
 .contact-email {
-  margin: 10px 0 0 0;
+  margin: 16px 0 0 0;
 }
 .email-link {
   text-decoration: underline;
@@ -234,7 +234,7 @@ a[href^="mailto:"] {
 }
 
 .feedback-form {
-  margin: 18px 0.5rem 0 0.5rem;
+  margin: 24px 0.5rem 0;
   width: auto;
   max-width: none;
   display: grid;
@@ -243,22 +243,11 @@ a[href^="mailto:"] {
   align-self: stretch;
 }
 
-.form-control,
-input[type="email"],
-input[type="file"],
-textarea {
-  width: 100%;
-  padding: 0.8rem;
-  border: 1px solid #DDDDDD;
-  border-radius: 3px;
-  font: inherit;
-  background: #FFFFFF;
-}
 
 /* ---------- DESKTOP (≥481px) ---------- */
 @media (min-width: 481px) {
   .site-main .feedback-form {
-    margin: 18px auto 0;
+    margin: 24px auto 0;
     display: grid;
     grid-template-columns: 200px 16px 609px;
     grid-auto-rows: max-content;
@@ -287,8 +276,7 @@ textarea {
   }
 
   .site-main .feedback-form .form-label:nth-of-type(2) {
-    position: relative;
-    top: 16px;
+    margin-top: 16px;
   }
 
   .site-main .feedback-form .consent-row {
@@ -296,18 +284,17 @@ textarea {
     position: relative;
     display: block;
     margin-top: 16px;
-    left: 0;
-    padding-left: 0;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
     position: absolute;
     left: -18px;
     top: 0;
     transform: scale(1.5);
-    transform-origin: left center;
+    transform-origin: left top;
     margin: 0;
   }
   .site-main .feedback-form .consent-row label {
+    display: block;
     margin: 0;
     text-align: left;
   }
@@ -316,7 +303,7 @@ textarea {
     grid-column: 3;
     justify-self: start;
     display: inline-block;
-    margin-top: 16px;
+    margin-top: 32px;
     font-size: 13.6px;
     line-height: 34px;
     height: 38px;
@@ -328,16 +315,13 @@ textarea {
 
 /* ---------- MOBILE (≤480px) ---------- */
 @media (max-width: 480px) {
-  .site-main > .feedback-form {
-    padding-left: 0;
-    padding-right: 0;
-  }
   .site-main .feedback-form {
     display: block;
     width: calc(100% - 1rem);
     margin-left: 0.5rem;
     margin-right: 0.5rem;
     max-width: none;
+    padding: 0;
   }
 
   .site-main .feedback-form .form-label {
@@ -355,27 +339,23 @@ textarea {
     margin: 0;
   }
 
-  .site-main .feedback-form input[type="email"] + .form-label,
-  .site-main .feedback-form textarea + .form-label {
-    margin-top: 16px;
-  }
-
-  .site-main .feedback-form input[type="file"] { margin-bottom: 0; }
-
   .site-main .feedback-form .consent-row {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
+    display: block;
     margin-top: 16px;
-    padding-left: 0;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
+    display: block;
     margin: 0;
     transform: scale(1.5);
-    transform-origin: left center;
+    transform-origin: left top;
   }
-  .site-main .feedback-form .consent-row label { margin: 0; }
+
+  .site-main .feedback-form .consent-row label {
+    display: block;
+    margin-top: 8px;
+    margin-left: 0;
+    text-align: left;
+  }
 
   .site-main .feedback-form .consent-row + .btn,
   .site-main .feedback-form .consent-row .btn {
@@ -387,6 +367,18 @@ textarea {
     padding: 0 12px;
     text-align: center;
   }
+}
+
+.form-control,
+input[type="email"],
+input[type="file"],
+textarea {
+  width: 100%;
+  padding: 0.8rem;
+  border: 1px solid #DDDDDD;
+  border-radius: 3px;
+  font: inherit;
+  background: #FFFFFF;
 }
 
 .checkbox-large {
