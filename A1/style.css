@@ -297,7 +297,7 @@ textarea {
     display: block;
     margin-top: 16px;
     left: 0;
-    padding-left: 0;
+    padding-left: 21px;
   }
   .site-main .feedback-form .consent-row input[type="checkbox"] {
     position: absolute;
