@@ -35,7 +35,7 @@
       </a>
     </p>
 
-    <form class="feedback"
+    <form class="feedback-form"
           action="https://postman-echo.com/post"
           method="POST"
           enctype="multipart/form-data">
@@ -43,7 +43,7 @@
         <input id="email" name="email" type="email" class = "form-control" required />
 
         <label for="feedback" class="form-label">Feedback:</label>
-        <textarea id="feedback" name="feedback" rows="4"
+        <textarea id="feedback" name="feedback" rows="4" cols ="60"
                 class="form-control" placeholder="Enter your feedback here" required></textarea>
 
         <label for="attachments" class="form-label">Attachment:</label>
@@ -55,7 +55,7 @@
           <label for="consent">You agree to receive emails from me</label>
         </div>
 
-        <button type="submit" class="btn btn--sm btn--form">Send Feedback</button>
+        <button type="submit" class="btn">Send Feedback</button>
     </form>
   </main>
 

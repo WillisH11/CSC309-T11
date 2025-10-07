@@ -226,7 +226,7 @@ a[href^="mailto:"] {
 }
 
 .contact-email {
-  margin: 16px 0 24px 0;
+  margin: 16px 0 0 0;
 }
 .email-link {
   text-decoration: underline;
@@ -234,9 +234,9 @@ a[href^="mailto:"] {
   font-weight: 700;
 }
 
+/* form container */
 .feedback-form {
-  margin-left: 0.5rem;
-  margin-right: 0.5rem;
+  margin: 24px 0.5rem 0 0.5rem;
   width: auto;
   max-width: none;
   display: grid;
@@ -244,6 +244,7 @@ a[href^="mailto:"] {
   text-align: left;
   align-self: stretch;
 }
+
 
 .form-control,
 input[type="email"],
@@ -257,9 +258,15 @@ textarea {
   background: #FFFFFF;
 }
 
+.checkbox-large {
+  transform: scale(1.5);
+  transform-origin: left center;
+}
+
 /* ---------- DESKTOP (≥481px) ---------- */
 @media (min-width: 481px) {
   .site-main .feedback-form {
+    margin: 24px auto 0;
     display: grid;
     grid-template-columns: 200px 16px 609px;
     grid-auto-rows: max-content;
@@ -269,6 +276,7 @@ textarea {
     max-width: 825px;
     justify-items: stretch;
   }
+  
 
   .site-main .feedback-form .form-label {
     grid-column: 1;
@@ -372,6 +380,7 @@ textarea {
     inline-size: auto;
   }
 }
+
 
 /* ===== Footer ===== */
 .site-footer {
