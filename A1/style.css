@@ -25,7 +25,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
-  background-color: #ffffff;
+  background-color: #f2f2f2;
   padding-inline: 0;
 }
 
@@ -33,11 +33,11 @@ a[href^="mailto:"] {
   font-family: "Times New Roman", Times, serif;
 }
 
-/* ===== Header ===== */
+/* ===== Header (fixed) ===== */
 .site-header {
   height: 70px;
   border-bottom: 1px solid #e5e7eb;
-  background: #111827;
+  background: #333333;
   color: #ffffff;
   display: flex;
   align-items: center;
@@ -106,17 +106,16 @@ a[href^="mailto:"] {
   object-position: center;
 }
 
-
 /* ===== index page ===== */
 .intro-title {
   margin: 0 0 16px;
-  font-size: 2rem;
+  font-size: 2.5rem;
   font-weight: 700;
 }
 
 .intro-subtitle {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.125rem;
   color: #374151;
 }
 
@@ -248,13 +247,13 @@ textarea {
 
 /* ===== Footer ===== */
 .site-footer {
+  background: #333333;
+  color: #ffffff;
   height: 3rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-top: 1px solid #e5e7eb;
-  background: #111827;
-  color: #ffffff;
+  border-top: none;
   margin-top: auto;
 }
 
