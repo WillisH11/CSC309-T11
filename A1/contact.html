@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  CSC309 Assignment 1
+  
+  University of Toronto
+  Fall 2025
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CSC309 A1 - Contact</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header" role="banner">
+    <nav class="nav" aria-label="Primary">
+      <a class="nav-link" href="index.html">Home</a>
+      <a class="nav-link" href="about.html">About</a>
+      <a class="nav-link active" href="contact.html">Contact</a>
+    </nav>
+  </header>
+
+  <main class="site-main" id="main" role="main">
+    <div class="avatar" aria-label="Portrait">
+      <img src="photo.jpg" alt="Portrait of [Willis]" />
+    </div>
+
+    <h1 class = "contact-name">Willis Huang</h1>
+
+    <p class="contact-email">
+      <a class="email-link"
+         href="mailto:huan3237@mail.utoronto.ca?subject=Bug%20Found&body=I%20found%20the%20following%20bug%20on%20your%20website:%0A%0A">
+        huan3237@mail.utoronto.ca
+      </a>
+    </p>
+
+    <form class="feedback"
+          action="https://postman-echo.com/post"
+          method="POST"
+          enctype="multipart/form-data">
+        <label for="email" class="form-label">Your email</label>
+        <input id="email" name="email" type="email" class = "form-control" required />
+
+        <label for="feedback" class="form-label">Your feedback</label>
+        <textarea id="feedback" name="feedback" rows="4"
+                class="form-control" placeholder="Enter your feedback here" required></textarea>
+
+        <label for="attachments" class="form-label">Attachment</label>
+        <input id="attachments" name="attachments" type="file" class="form-control" required />
+
+        <div class="consent-row">
+          <input id="consent" name="consent" type="checkbox" value="yes"
+                class="checkbox-large" required />
+          <label for="consent">You agree to receive emails from me</label>
+        </div>
+
+        <button type="submit" class="btn">Send Feedback</button>
+    </form>
+  </main>
+
+  <footer class="site-footer" role="contentinfo">
+    <p>Copyright 2025 by huan3237</p>
+  </footer>
+</body>
+</html>
