@@ -83,7 +83,7 @@ app.post('/notes', basicAuth, async (req, res) => {
       },
     });
 
-    return res.json(note);
+    return res.status(201).json(note);
   } catch (err) {
     console.error(err);
     return jsonErr(res, 500, 'Internal server error');
