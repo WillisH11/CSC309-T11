@@ -1,8 +1,9 @@
 {
-    "total_points": 14.618599033816425,
-    "total_available_points": 24,
+    "comment": "Student did not attend midterm. With a valid reason, the 15% might be shifted to the final exam. Please refer to your official request submitted to the course staff. Lecture exercises are designed to help you stay engaged during lectures and reinforce your understanding of the course materials. Make sure to complete them on time even though they are not worth that much! ",
+    "total_points": 10.383599033816425,
+    "total_available_points": 17.7,
     "in_lecture_exercises": {
-        "marks_earned": 4.705555555555556,
+        "marks_earned": 0.4705555555555555,
         "notes": "Each lecture exercise is out of 0.1% and we are taking the best 10 out of 12. For now, we have 7 lecture exercises in total. So there's no need to take best 10 out of 12.",
         "details": {
             "lecture_1_exercise": 88.88888888888889,
