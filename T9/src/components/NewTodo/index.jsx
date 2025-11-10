@@ -1,7 +1,7 @@
 import "./style.css";
 import React, { useState } from "react";
 
-function NewTodo( {addTodo}) {
+function NewTodo({ addTodo }) {
     const [text, setText] = useState("");
 
     function handleSubmit() {
