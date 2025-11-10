@@ -6,7 +6,9 @@ function NewTodo({ addTodo }) {
 
     function handleSubmit() {
         if (!text.trim()) return;
-        addTodo(text.trim());
+        if (addTodo) {
+            addTodo(text.trim());
+        }
         setText("");
     }
 
@@ -22,6 +24,5 @@ function NewTodo({ addTodo }) {
         </div>
     );
 }
-
 
 export default NewTodo;
