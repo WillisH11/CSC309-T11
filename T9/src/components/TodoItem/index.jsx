@@ -2,7 +2,6 @@ import "./style.css";
 import trash from "./trash.webp";
 
 function TodoItem({ todo, onDelete, onToggle }) {
-
     function handleDelete(e) {
         e.preventDefault();
         onDelete(todo.id);
@@ -20,13 +19,12 @@ function TodoItem({ todo, onDelete, onToggle }) {
                 {todo.text}
             </span>
 
-            {/* eslint-disable jsx-a11y/anchor-is-valid */}
             <a href="#" onClick={handleDelete}>
                 <img src={trash} alt="delete" />
             </a>
-            {/* eslint-enable jsx-a11y/anchor-is-valid */}
         </div>
     );
 }
+
 
 export default TodoItem;
