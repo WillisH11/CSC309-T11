@@ -6,9 +6,11 @@ function NewTodo({ addTodo }) {
 
     function handleSubmit() {
         if (!text.trim()) return;
-        if (addTodo) {
+
+        if (typeof addTodo === "function") {
             addTodo(text.trim());
         }
+
         setText("");
     }
 
