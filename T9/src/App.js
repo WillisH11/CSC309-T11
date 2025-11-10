@@ -1,4 +1,7 @@
 import "./App.css";
+import React, { useState } from "react";
+import NewTodo from "./components/NewTodo";
+import TodoItem from "./components/TodoItem";
 
 // You can use this to seed your TODO list
 const seed = [
@@ -10,9 +13,45 @@ const seed = [
 ];
 
 function App() {
-    // Complete me
+  const [todos, setTodos] = useState(seed);
 
-    return <h1>Complete me</h1>;
+  function addTodo(text) {
+    const newTodo = {
+      id: Date.now(),
+      text,
+      completed: false,
+    };
+    setTodos([...todos, newTodo]);
+  }
+
+  function deleteTodo(id) {
+    setTodos(todos.filter(t => t.id !== id));
+  }
+
+  function toggleTodo(id) {
+    setTodos(
+      todos.map(t =>
+        t.id === id ? { ...t, completed: !t.completed } : t
+      )
+    );
+  }
+
+  return (
+    <div className="app">
+      <h1>My ToDos</h1>
+
+      <NewTodo addTodo={addTodo} />
+
+      {todos.map(todo => (
+        <TodoItem
+          key={todo.id}
+          todo={todo}
+          onDelete={deleteTodo}
+          onToggle={toggleTodo}
+        />
+      ))}
+    </div>
+  );
 }
 
 export default App;
