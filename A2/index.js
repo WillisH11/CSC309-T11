@@ -134,14 +134,28 @@ function requireClearance(minRole) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    // Validate req.auth.id exists and is valid
+    if (!req.auth.id) {
+      console.error(`[AUTH] Missing user ID in token`);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
     try {
+      // Convert id to number if it's a string (JWT tokens might have string IDs)
+      const userId = typeof req.auth.id === "string" ? parseInt(req.auth.id, 10) : req.auth.id;
+      
+      if (isNaN(userId) || !Number.isInteger(userId) || userId < 1) {
+        console.error(`[AUTH] Invalid user ID: ${req.auth.id}`);
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       // fetch real user from DB
       const user = await prisma.user.findUnique({
-        where: { id: req.auth.id }
+        where: { id: userId }
       });
 
       if (!user) {
-        console.error(`[AUTH] User not found: id=${req.auth.id}`);
+        console.error(`[AUTH] User not found: id=${userId}`);
         return res.status(401).json({ error: "Unauthorized" });
       }
 
@@ -153,10 +167,17 @@ function requireClearance(minRole) {
       }
 
       const userRank = roleRank[role];
-      const minRank = roleRank[minRole];
+      // Normalize minRole to lowercase before lookup
+      const normalizedMinRole = String(minRole).toLowerCase();
+      const minRank = roleRank[normalizedMinRole];
+
+      if (minRank === undefined) {
+        console.error(`[AUTH] Invalid minRole: ${minRole} (normalized: ${normalizedMinRole})`);
+        return res.status(500).json({ error: "server error" });
+      }
 
       if (userRank < minRank) {
-        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${minRole} (rank=${minRank}) for ${req.method} ${req.path}`);
+        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${normalizedMinRole} (rank=${minRank}) for ${req.method} ${req.path}`);
         return res.status(403).json({ error: "Forbidden" });
       }
 
@@ -1895,13 +1916,8 @@ app.get("/transactions/:transactionId",requireClearance("manager"),async (req, r
   }
 );
 
-// GET /users/:userId/transactions
-app.get("/users/:userId/transactions", requireClearance("manager"), async (req, res) => {
-  const userId = Number(req.params.userId);
-  if (Number.isNaN(userId)) {
-    return res.status(400).json({ error: "invalid id" });
-  }
-
+// GET /users/me/transactions - MUST come before /users/:userId/transactions to avoid route conflict
+app.get("/users/me/transactions", requireClearance("regular"), async (req, res) => {
   const {
     type,
     relatedId,
@@ -1912,7 +1928,7 @@ app.get("/users/:userId/transactions", requireClearance("manager"), async (req, 
     limit = "10",
   } = req.query;
 
-  const where = { ownerId: userId };
+  const where = { ownerId: req.auth.id };
 
   if (typeof type === "string" && type.trim() !== "") {
     where.type = type.trim();
@@ -1982,8 +1998,13 @@ app.get("/users/:userId/transactions", requireClearance("manager"), async (req, 
   }
 });
 
-// GET /users/me/transactions
-app.get("/users/me/transactions", requireClearance("regular"), async (req, res) => {
+// GET /users/:userId/transactions - MUST come after /users/me/transactions
+app.get("/users/:userId/transactions", requireClearance("manager"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (Number.isNaN(userId) || !Number.isInteger(userId) || userId < 1) {
+    return res.status(400).json({ error: "invalid id" });
+  }
+
   const {
     type,
     relatedId,
@@ -1994,7 +2015,7 @@ app.get("/users/me/transactions", requireClearance("regular"), async (req, res) 
     limit = "10",
   } = req.query;
 
-  const where = { ownerId: req.auth.id };
+  const where = { ownerId: userId };
 
   if (typeof type === "string" && type.trim() !== "") {
     where.type = type.trim();
