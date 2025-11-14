@@ -50,15 +50,15 @@ app.use(
 );
 
 app.use((req, res, next) => {
-  if (!req.auth) return next();
+  // Only process if auth token was provided
+  if (req.auth) {
+    if (typeof req.auth.role === "string") {
+      req.auth.role = req.auth.role.toLowerCase();
+    }
 
-  
-  if (typeof req.auth.role === "string") {
-    req.auth.role = req.auth.role.toLowerCase();
-  }
-
-  if (!req.auth.id) {
-    return res.status(401).json({ error: "Unauthorized" });
+    if (!req.auth.id) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
   }
 
   next();
@@ -79,11 +79,12 @@ function requireClearance(minRole) {
       return res.status(401).json({ error: "Unauthorized" });
 
     const role = String(req.auth.role || "").toLowerCase();
+    const rank = roleRank[role];
 
-    if (!roleRank[role])
+    if (typeof rank !== "number")
       return res.status(401).json({ error: "Unauthorized" });
 
-    if (roleRank[role] < roleRank[minRole])
+    if (rank < roleRank[minRole])
       return res.status(403).json({ error: "Forbidden" });
 
     next();
@@ -1419,10 +1420,10 @@ app.get("/transactions", requireClearance("manager"), async (req, res) => {
     };
   }
 
-  if (typeof suspicious === "string") {
-    if (suspicious === "true") where.suspicious = true;
-    else if (suspicious === "false") where.suspicious = false;
-  }
+  if (suspicious === "true" || suspicious === "1") where.suspicious = true;
+  else if (suspicious === "false" || suspicious === "0") where.suspicious = false;
+  else if (suspicious !== undefined)
+    return res.status(400).json({ error: "invalid suspicious" });
 
   if (promotionId !== undefined) {
     const pid = Number(promotionId);
