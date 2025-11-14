@@ -89,39 +89,19 @@ const roleRank = {
 };
 
 function requireClearance(minRole) {
-  return async (req, res, next) => {
-    if (!req.auth) {
+  return (req, res, next) => {
+    if (!req.auth)
       return res.status(401).json({ error: "Unauthorized" });
-    }
 
-    try {
-      const user = await prisma.user.findUnique({
-        where: { id: req.auth.id }
-      });
+    const userRole = String(req.auth.role).toLowerCase();
 
-      if (!user) {
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+    if (!(userRole in roleRank))
+      return res.status(401).json({ error: "Unauthorized" });
 
-      const userRole = String(user.role || "").toLowerCase();
-      const userRank = roleRank[userRole] || 0;
-      const neededRank = roleRank[minRole];
+    if (roleRank[userRole] < roleRank[minRole])
+      return res.status(403).json({ error: "Forbidden" });
 
-      if (userRank < neededRank) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-
-      req.auth = {
-        ...req.auth,
-        ...user,
-        role: userRole
-      };
-
-      next();
-    } catch (e) {
-      console.error(e);
-      return res.status(500).json({ error: "server error" });
-    }
+    next();
   };
 }
 
