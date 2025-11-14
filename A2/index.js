@@ -66,21 +66,6 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
-app.use((req, res, next) => {
-  // Only process if auth token was provided
-  if (req.auth) {
-    if (typeof req.auth.role === "string") {
-      req.auth.role = req.auth.role.toLowerCase();
-    }
-
-    if (!req.auth.id) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-  }
-
-  next();
-});
-
 // ====== roles & helpers ======
 
 const roleRank = {
@@ -192,7 +177,7 @@ function isValidName(name) {
 function isValidEmail(email) {
   return (
     typeof email === "string" &&
-    /^[^@]+@mail\.utoronto\.ca$/.test(email)
+    (/^[^@]+@mail\.utoronto\.ca$/.test(email) || /^[^@]+@utoronto\.ca$/.test(email))
   );
 }
 
@@ -582,6 +567,11 @@ app.patch("/users/me", requireClearance("regular"), async (req, res) => {
   const allowed = ["name", "email", "birthday", "avatarUrl"];
   const updates = {};
 
+  // Handle empty body
+  if (!req.body || typeof req.body !== "object") {
+    return res.status(400).json({ error: "empty payload" });
+  }
+
   for (const key of Object.keys(req.body)) {
     if (!allowed.includes(key))
       return res.status(400).json({ error: "invalid field" });
@@ -706,6 +696,11 @@ app.patch("/users/:id", requireClearance("manager"), async (req, res) => {
   const allowed = ["email", "verified", "suspicious", "role"];
   const updates = {};
 
+  // Handle empty body
+  if (!req.body || typeof req.body !== "object") {
+    return res.status(400).json({ error: "empty payload" });
+  }
+
   for (const key of Object.keys(req.body)) {
     if (!allowed.includes(key))
       return res.status(400).json({ error: "bad field" });
@@ -792,6 +787,11 @@ app.patch("/users/:id", requireClearance("manager"), async (req, res) => {
 // ====================
 
 app.post("/promotions", requireClearance("manager"), async (req, res) => {
+  // Check for empty payload first (after authorization)
+  if (!req.body || typeof req.body !== "object" || Object.keys(req.body).length === 0) {
+    return res.status(400).json({ error: "missing required fields" });
+  }
+
   const {
     name,
     description,
@@ -2074,6 +2074,11 @@ function validateEventTimes(startTime, endTime) {
 // ==============
 
 app.post("/events", requireClearance("manager"), async (req, res) => {
+  // Check for empty payload first (after authorization)
+  if (!req.body || typeof req.body !== "object" || Object.keys(req.body).length === 0) {
+    return res.status(400).json({ error: "missing fields" });
+  }
+
   const { name, description, location, startTime, endTime, capacity, points } =
     req.body || {};
 
@@ -2337,6 +2342,7 @@ app.patch("/events/:id", async (req, res) => {
 
     const data = { ...req.body };
 
+    // Check authorization for restricted fields FIRST (before validation)
     // Only managers can update points and published
     if (!isManager) {
       if (data.points !== undefined || data.published !== undefined) {
