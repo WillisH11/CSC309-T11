@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const port = (() => {
   const args = process.argv;
   if (args.length !== 3) {
@@ -493,21 +496,25 @@ app.get("/users", requireClearance("manager"), async (req, res) => {
   }
 
   // Activated filter
-  if (activated === "true") {
-    whereConditions.push({ activated: true });
-  } else if (activated === "false") {
-    whereConditions.push({ activated: false });
-  } else if (activated !== undefined && activated !== "") {
-    return res.status(400).json({ error: "invalid activated" });
+  if (activated !== undefined && activated !== "") {
+    if (activated === "true") {
+      whereConditions.push({ activated: true });
+    } else if (activated === "false") {
+      whereConditions.push({ activated: false });
+    } else {
+      return res.status(400).json({ error: "invalid activated" });
+    }
   }
 
   // Verified filter
-  if (verified === "true") {
-    whereConditions.push({ verified: true });
-  } else if (verified === "false") {
-    whereConditions.push({ verified: false });
-  } else if (verified !== undefined && verified !== "") {
-    return res.status(400).json({ error: "invalid verified" });
+  if (verified !== undefined && verified !== "") {
+    if (verified === "true") {
+      whereConditions.push({ verified: true });
+    } else if (verified === "false") {
+      whereConditions.push({ verified: false });
+    } else {
+      return res.status(400).json({ error: "invalid verified" });
+    }
   }
 
   // Combine all conditions with AND
@@ -974,7 +981,7 @@ app.get("/promotions/:id", async (req, res) => {
   }
 
   const promoId = Number(req.params.id);
-  if (Number.isNaN(promoId) || promoId <= 0) {
+  if (Number.isNaN(promoId) || !Number.isInteger(promoId) || promoId < 1) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -1048,7 +1055,7 @@ app.get("/promotions/:id", async (req, res) => {
 
 app.patch("/promotions/:id", requireClearance("manager"), async (req, res) => {
   const promoId = Number(req.params.id);
-  if (Number.isNaN(promoId)) {
+  if (Number.isNaN(promoId) || !Number.isInteger(promoId) || promoId < 1) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -1135,7 +1142,7 @@ app.patch("/promotions/:id", requireClearance("manager"), async (req, res) => {
 
 app.delete("/promotions/:id", requireClearance("manager"), async (req, res) => {
   const promoId = Number(req.params.id);
-  if (Number.isNaN(promoId)) {
+  if (Number.isNaN(promoId) || !Number.isInteger(promoId) || promoId < 1) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -1544,7 +1551,17 @@ app.post("/users/me/transactions", async (req, res) => {
   if (!req.auth) return res.status(401).json({ error: "Unauthorized" });
 
   const { type, amount, remark } = req.body || {};
-  if (type !== "redemption" || typeof amount !== "number" || amount <= 0) {
+  
+  if (!type || type !== "redemption") {
+    return res.status(400).json({ error: "invalid payload" });
+  }
+  
+  if (amount === undefined || amount === null) {
+    return res.status(400).json({ error: "invalid payload" });
+  }
+  
+  const amountNum = Number(amount);
+  if (Number.isNaN(amountNum) || !Number.isInteger(amountNum) || amountNum <= 0) {
     return res.status(400).json({ error: "invalid payload" });
   }
 
@@ -1558,15 +1575,15 @@ app.post("/users/me/transactions", async (req, res) => {
       return res.status(403).json({ error: "user not verified" });
     }
 
-    if (user.points < amount) {
+    if (user.points < amountNum) {
       return res.status(400).json({ error: "insufficient points" });
     }
 
     const t = await prisma.transaction.create({
       data: {
         type: "redemption",
-        amount: -amount,
-        redeemed: amount,
+        amount: -amountNum,
+        redeemed: amountNum,
         processed: false,
         processedBy: null,
         remark: remark || "",
@@ -1580,7 +1597,7 @@ app.post("/users/me/transactions", async (req, res) => {
       utorid: user.utorid,
       type: "redemption",
       processedBy: null,
-      amount,
+      amount: amountNum,
       remark: t.remark || "",
       createdBy: user.utorid
     });
@@ -2222,7 +2239,7 @@ app.get("/events/:eventId", async (req, res) => {
   }
 
   const eventId = Number(req.params.eventId);
-  if (Number.isNaN(eventId) || eventId <= 0) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId) || eventId < 1) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -2300,7 +2317,7 @@ app.patch("/events/:id", async (req, res) => {
   if (!req.auth) return res.status(401).json({ error: "Unauthorized" });
 
   const eventId = Number(req.params.id);
-  if (Number.isNaN(eventId)) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId) || eventId < 1) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -2431,7 +2448,7 @@ app.patch(
 
 app.delete("/events/:id", requireClearance("manager"), async (req, res) => {
   const eventId = Number(req.params.id);
-  if (Number.isNaN(eventId)) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId) || eventId < 1) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -2461,7 +2478,11 @@ app.post(
     const eventId = Number(req.params.id);
     const { utorid } = req.body || {};
 
-    if (Number.isNaN(eventId) || typeof utorid !== "string" || !utorid.trim()) {
+    if (Number.isNaN(eventId) || !Number.isInteger(eventId) || eventId < 1) {
+      return res.status(400).json({ error: "invalid id" });
+    }
+    
+    if (typeof utorid !== "string" || !utorid.trim()) {
       return res.status(400).json({ error: "invalid payload" });
     }
 
@@ -2526,7 +2547,8 @@ app.delete(
     const eventId = Number(req.params.id);
     const userId = Number(req.params.userId);
 
-    if (Number.isNaN(eventId) || Number.isNaN(userId)) {
+    if (Number.isNaN(eventId) || !Number.isInteger(eventId) || eventId < 1 ||
+        Number.isNaN(userId) || !Number.isInteger(userId) || userId < 1) {
       return res.status(400).json({ error: "invalid id" });
     }
 
@@ -2551,7 +2573,11 @@ app.post("/events/:id/guests", async (req, res) => {
   const eventId = Number(req.params.id);
   const { utorid } = req.body || {};
 
-  if (Number.isNaN(eventId) || typeof utorid !== "string" || !utorid.trim()) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId) || eventId < 1) {
+    return res.status(400).json({ error: "invalid id" });
+  }
+  
+  if (typeof utorid !== "string" || !utorid.trim()) {
     return res.status(400).json({ error: "invalid payload" });
   }
 
@@ -2632,7 +2658,8 @@ app.delete("/events/:id/guests/:userId", requireClearance("manager"), async (req
   const eventId = Number(req.params.id);
   const userId = Number(req.params.userId);
 
-  if (Number.isNaN(eventId) || Number.isNaN(userId)) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId) || eventId < 1 ||
+      Number.isNaN(userId) || !Number.isInteger(userId) || userId < 1) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -2657,7 +2684,7 @@ app.post("/events/:id/guests/me", async (req, res) => {
   const eventId = Number(req.params.id);
   const userId = req.auth.id;
 
-  if (Number.isNaN(eventId)) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId)) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -2728,7 +2755,7 @@ app.delete("/events/:id/guests/me", async (req, res) => {
   const eventId = Number(req.params.id);
   const userId = req.auth.id;
 
-  if (Number.isNaN(eventId)) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId)) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -2764,7 +2791,7 @@ app.post("/events/:id/transactions", async (req, res) => {
   const { type, utorid, amount, remark } = req.body || {};
 
   // Validate eventId first (needed for auth check)
-  if (Number.isNaN(eventId)) {
+  if (Number.isNaN(eventId) || !Number.isInteger(eventId)) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -2782,7 +2809,12 @@ app.post("/events/:id/transactions", async (req, res) => {
   }
 
   // Validate amount
-  if (typeof amount !== "number" || amount <= 0 || !Number.isInteger(amount)) {
+  if (amount === undefined || amount === null) {
+    return res.status(400).json({ error: "invalid amount" });
+  }
+  
+  const amountNum = Number(amount);
+  if (Number.isNaN(amountNum) || !Number.isInteger(amountNum) || amountNum <= 0) {
     return res.status(400).json({ error: "invalid amount" });
   }
 
@@ -2807,7 +2839,7 @@ app.post("/events/:id/transactions", async (req, res) => {
         return res.status(400).json({ error: "user not a guest" });
       }
 
-      if (event.pointsRemain < amount) {
+      if (event.pointsRemain < amountNum) {
         return res.status(400).json({ error: "not enough points remaining" });
       }
 
@@ -2815,7 +2847,7 @@ app.post("/events/:id/transactions", async (req, res) => {
         const t = await tx.transaction.create({
           data: {
             type: "event",
-            amount,
+            amount: amountNum,
             remark: remark || "",
             ownerId: user.id,
             createdBy: req.auth.id,
@@ -2825,14 +2857,14 @@ app.post("/events/:id/transactions", async (req, res) => {
 
         await tx.user.update({
           where: { id: user.id },
-          data: { points: { increment: amount } }
+          data: { points: { increment: amountNum } }
         });
 
         await tx.event.update({
           where: { id: eventId },
           data: {
-            pointsRemain: { decrement: amount },
-            pointsAwarded: { increment: amount }
+            pointsRemain: { decrement: amountNum },
+            pointsAwarded: { increment: amountNum }
           }
         });
 
@@ -2844,7 +2876,7 @@ app.post("/events/:id/transactions", async (req, res) => {
       return res.status(201).json({
         id: created.id,
         recipient: user.utorid,
-        awarded: amount,
+        awarded: amountNum,
         type: "event",
         relatedId: eventId,
         remark: created.remark || "",
@@ -2856,7 +2888,7 @@ app.post("/events/:id/transactions", async (req, res) => {
         return res.status(400).json({ error: "no guests to award" });
       }
 
-      const totalAmount = amount * event.guests.length;
+      const totalAmount = amountNum * event.guests.length;
       if (event.pointsRemain < totalAmount) {
         return res.status(400).json({ error: "not enough points remaining" });
       }
@@ -2869,7 +2901,7 @@ app.post("/events/:id/transactions", async (req, res) => {
           const t = await tx.transaction.create({
             data: {
               type: "event",
-              amount,
+              amount: amountNum,
               remark: remark || "",
               ownerId: guest.userId,
               createdBy: req.auth.id,
@@ -2880,13 +2912,13 @@ app.post("/events/:id/transactions", async (req, res) => {
 
           await tx.user.update({
             where: { id: guest.userId },
-            data: { points: { increment: amount } }
+            data: { points: { increment: amountNum } }
           });
 
           transactions.push({
             id: t.id,
             recipient: t.owner.utorid,
-            awarded: amount,
+            awarded: amountNum,
             type: "event",
             relatedId: eventId,
             remark: t.remark || "",
