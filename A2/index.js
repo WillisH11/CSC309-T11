@@ -64,14 +64,22 @@ function requireClearance(minRole) {
     if (!req.auth) {
       return res.status(401).json({ error: "Unauthorized" });
     }
-    const userRank = roleRank[req.auth.role] || 0;
+
+    // Normalize role from token
+    const userRole = String(req.auth.role).toLowerCase();
+    const userRank = roleRank[userRole] || 0;
     const neededRank = roleRank[minRole];
+
     if (userRank < neededRank) {
       return res.status(403).json({ error: "Forbidden" });
     }
+
+    req.auth.role = userRole;
+
     next();
   };
 }
+
 
 const PASSWORD_REGEX =
     /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,20}$/;
@@ -134,7 +142,12 @@ app.post("/auth/tokens", async (req, res) => {
       {
         id: user.id,
         utorid: user.utorid,
-        role: user.role
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        activated: user.activated,
+        verified: user.verified,
+        suspicious: user.suspicious
       },
       process.env.JWT_SECRET || "development-secret",
       { expiresIn: "1h" }
@@ -310,45 +323,71 @@ app.post("/users", requireClearance("cashier"), async (req, res) => {
 
 // GET /users (Manager or higher, with filters & pagination)
 app.get("/users", requireClearance("manager"), async (req, res) => {
-  const { name, role, verified, activated, page = "1", limit = "10" } = req.query;
+  const {
+    name,
+    utorid,
+    role,
+    activated,
+    verified,
+    suspicious,
+    page = "1",
+    limit = "10"
+  } = req.query;
+
+  const pageNum = Number(page);
+  const limitNum = Number(limit);
+
+  if (!Number.isFinite(pageNum) || !Number.isInteger(pageNum) || pageNum < 1) {
+    return res.status(400).json({ error: "invalid page" });
+  }
+
+  if (!Number.isFinite(limitNum) || !Number.isInteger(limitNum) || limitNum < 1) {
+    return res.status(400).json({ error: "invalid limit" });
+  }
+
+  const skip = (pageNum - 1) * limitNum;
 
   const where = {};
 
-  // name filter: utorid or name, substring match
   if (typeof name === "string" && name.trim() !== "") {
-    where.OR = [
-      { utorid: { contains: name.trim() } },
-      { name: { contains: name.trim() } },
-    ];
+    where.name = { contains: name, mode: "insensitive" };
   }
 
-  if (typeof role === "string" && role.trim() !== "") {
-    where.role = role.trim();
+  if (typeof utorid === "string" && utorid.trim() !== "") {
+    where.utorid = { contains: utorid, mode: "insensitive" };
   }
 
-  if (typeof verified === "string") {
-    if (verified === "true") where.verified = true;
-    else if (verified === "false") where.verified = false;
+  if (role !== undefined) {
+    const roleLower = String(role).toLowerCase();
+    if (!["regular", "cashier", "manager", "superuser"].includes(roleLower))
+      return res.status(400).json({ error: "invalid role" });
+    where.role = roleLower;
   }
 
-  if (typeof activated === "string") {
-    if (activated === "true") where.activated = true;
-    else if (activated === "false") where.activated = false;
-  }
+  if (activated === "true") where.activated = true;
+  else if (activated === "false") where.activated = false;
+  else if (activated !== undefined)
+    return res.status(400).json({ error: "invalid activated" });
 
-  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
-  const limitNum = Math.max(Math.min(parseInt(limit, 10) || 10, 50), 1);
-  const skip = (pageNum - 1) * limitNum;
+  if (verified === "true") where.verified = true;
+  else if (verified === "false") where.verified = false;
+  else if (verified !== undefined)
+    return res.status(400).json({ error: "invalid verified" });
+
+  if (suspicious === "true") where.suspicious = true;
+  else if (suspicious === "false") where.suspicious = false;
+  else if (suspicious !== undefined)
+    return res.status(400).json({ error: "invalid suspicious" });
 
   try {
-    const [count, users] = await prisma.$transaction([
+    const [count, users] = await Promise.all([
       prisma.user.count({ where }),
       prisma.user.findMany({
         where,
         skip,
         take: limitNum,
-        orderBy: { id: "asc" },
-      }),
+        orderBy: { id: "asc" }
+      })
     ]);
 
     return res.json({
@@ -359,367 +398,124 @@ app.get("/users", requireClearance("manager"), async (req, res) => {
         name: u.name,
         email: u.email,
         role: u.role,
-        verified: u.verified,
         activated: u.activated,
-        suspicious: u.suspicious,
-        lastLogin: u.lastLogin,
-      })),
+        verified: u.verified,
+        suspicious: u.suspicious
+      }))
     });
   } catch (e) {
-    console.error(e);
     return res.status(500).json({ error: "server error" });
   }
 });
 
-// helper: fetch available one-time promotions for a user
-async function getAvailableOneTimePromotionsForUser(userId) {
-  const now = new Date();
-  const promos = await prisma.promotion.findMany({
-    where: {
-      type: "onetime",
-      startTime: { lte: now },
-      endTime: { gte: now },
-      promotionUsers: {
-        none: {
-          userId,
-          used: true
-        }
-      }
-    }
-  });
-
-  return promos.map((p) => ({
-    id: p.id,
-    name: p.name,
-    minSpending: p.minSpending,
-    rate: p.rate,
-    points: p.points
-  }));
-}
 
 // GET /users/:id (Cashier or higher)
-app.get("/users/:id", requireClearance("cashier"), async (req, res) => {
-  const userId = Number(req.params.id);
+app.get("/users/:id", requireClearance("manager"), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid id" });
 
-  try {
-    const target = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        promotionUses: {
-          include: { promotion: true },
-        },
-      },
-    });
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) return res.status(404).json({ error: "not found" });
 
-    if (!target) {
-      return res.status(404).json({ error: "not found" });
-    }
-
-    const now = new Date();
-    const availableOneTimes = await prisma.promotion.findMany({
-      where: {
-        type: "onetime",
-        startTime: { lte: now },
-        endTime: { gte: now },
-        promotionUsers: {
-          none: {
-            userId: target.id,
-            used: true,
-          },
-        },
-      },
-    });
-
-    const promotions = availableOneTimes.map((p) => ({
-      id: p.id,
-      name: p.name,
-      minSpending: p.minSpending,
-      rate: p.rate,
-      points: p.points,
-    }));
-
-    const isManager = roleRank[req.auth.role] >= roleRank["manager"];
-
-    if (!isManager) {
-      return res.json({
-        id: target.id,
-        utorid: target.utorid,
-        name: target.name,
-        points: target.points,
-        verified: target.verified,
-        promotions,
-      });
-    }
-
-    return res.json({
-      id: target.id,
-      utorid: target.utorid,
-      name: target.name,
-      email: target.email,
-      birthday: target.birthday,
-      role: target.role,
-      points: target.points,
-      createdAt: target.createdAt,
-      lastLogin: target.lastLogin,
-      verified: target.verified,
-      avatarUrl: target.avatarUrl,
-      promotions,
-    });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "server error" });
-  }
+  return res.json({
+    id: user.id,
+    utorid: user.utorid,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    activated: user.activated,
+    verified: user.verified,
+    suspicious: user.suspicious
+  });
 });
+
 
 
 // PATCH /users/:id (Manager or higher)
 app.patch("/users/:id", requireClearance("manager"), async (req, res) => {
-    const userId = Number(req.params.id);
-    if (!Number.isInteger(userId)) {
-        return res.status(404).json({ error: "not found" });
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: "invalid id" });
+
+  const allowed = ["name", "email", "role", "activated", "verified", "suspicious"];
+  const data = {};
+
+  if (Object.keys(req.body).length === 0) {
+    return res.status(400).json({ error: "empty payload" });
+  }
+
+  for (const key of Object.keys(req.body)) {
+    if (!allowed.includes(key))
+      return res.status(400).json({ error: "bad field" });
+
+    if (["activated", "verified", "suspicious"].includes(key)) {
+      if (typeof req.body[key] !== "boolean")
+        return res.status(400).json({ error: "must be boolean" });
     }
 
-    const body = req.body || {};
-    const allowedFields = ["email", "verified", "suspicious", "role"];
-    const keys = Object.keys(body);
+    data[key] = req.body[key];
+  }
 
-    if (keys.length === 0) {
-        return res.status(400).json({ error: "empty payload" });
-    }
+  try {
+    const exists = await prisma.user.findUnique({ where: { id } });
+    if (!exists) return res.status(404).json({ error: "not found" });
 
-    if (keys.some(k => !allowedFields.includes(k))) {
-        return res.status(400).json({ error: "invalid fields" });
-    }
+    const updated = await prisma.user.update({
+      where: { id },
+      data
+    });
 
-    try {
-        const target = await prisma.user.findUnique({ where: { id: userId } });
-        if (!target) {
-            return res.status(404).json({ error: "not found" });
-        }
-
-        const data = {};
-
-        // email
-        if ("email" in body) {
-            if (!isValidEmail(body.email)) {
-                return res.status(400).json({ error: "invalid email" });
-            }
-            const existingEmail = await prisma.user.findUnique({
-                where: { email: body.email }
-            });
-            if (existingEmail && existingEmail.id !== userId) {
-                return res.status(400).json({ error: "email already used" });
-            }
-            data.email = body.email;
-        }
-
-        // verified
-        if ("verified" in body) {
-            if (typeof body.verified !== "boolean") {
-                return res.status(400).json({ error: "invalid verified" });
-            }
-            data.verified = body.verified;
-        }
-
-        // suspicious
-        if ("suspicious" in body) {
-            if (typeof body.suspicious !== "boolean") {
-                return res.status(400).json({ error: "invalid suspicious" });
-            }
-            data.suspicious = body.suspicious;
-        }
-
-        // role
-        if ("role" in body) {
-            const newRole = body.role;
-            if (!["regular", "cashier", "manager", "superuser"].includes(newRole)) {
-                return res.status(400).json({ error: "invalid role" });
-            }
-
-            const currentRole = req.auth.role;
-
-            // Manager can only set to cashier or regular
-            if (
-                currentRole === "manager" &&
-                !["cashier", "regular"].includes(newRole)
-            ) {
-                return res.status(403).json({ error: "forbidden role change" });
-            }
-
-            // When promoting to cashier, user must not be suspicious
-            const suspiciousNew =
-                "suspicious" in body ? body.suspicious : target.suspicious;
-            if (newRole === "cashier" && suspiciousNew) {
-                return res
-                    .status(400)
-                    .json({ error: "suspicious user cannot be cashier" });
-            }
-
-            data.role = newRole;
-        }
-
-        const updated = await prisma.user.update({
-            where: { id: userId },
-            data
-        });
-
-        const response = {
-            id: updated.id,
-            utorid: updated.utorid,
-            name: updated.name
-        };
-
-        if ("email" in data) response.email = updated.email;
-        if ("verified" in data) response.verified = updated.verified;
-        if ("suspicious" in data) response.suspicious = updated.suspicious;
-        if ("role" in data) response.role = updated.role;
-
-        return res.json(response);
-    } catch (e) {
-        console.error(e);
-        return res.status(500).json({ error: "server error" });
-    }
+    return res.json(updated);
+  } catch (e) {
+    return res.status(500).json({ error: "server error" });
+  }
 });
+
 
 
 // GET /users/me
-app.get("/users/me", async (req, res) => {
-    if (!req.auth) {
-        return res.status(401).json({ error: "Unauthorized" });
-    }
+app.get("/users/me", (req, res) => {
+  if (!req.auth) return res.status(401).json({ error: "unauthorized" });
 
-    try {
-        const me = await prisma.user.findUnique({
-            where: { id: req.auth.id }
-        });
+  const u = req.auth;
 
-        if (!me) {
-            return res.status(404).json({ error: "not found" });
-        }
-
-        const now = new Date();
-
-        // Available one-time promotions for this user
-        const promos = await prisma.promotion.findMany({
-            where: {
-                type: "onetime",
-                startTime: { lte: now },
-                endTime: { gte: now },
-                promotionUsers: {
-                    none: {
-                        userId: me.id,
-                        used: true
-                    }
-                }
-            },
-            select: {
-                id: true,
-                name: true,
-                minSpending: true,
-                rate: true,
-                points: true
-            }
-        });
-
-        return res.json({
-            id: me.id,
-            utorid: me.utorid,
-            name: me.name,
-            email: me.email,
-            birthday: me.birthday,
-            role: me.role,
-            points: me.points,
-            createdAt: me.createdAt,
-            lastLogin: me.lastLogin,
-            verified: me.verified,
-            avatarUrl: me.avatarUrl,
-            promotions: promos
-        });
-    } catch (e) {
-        console.error(e);
-        return res.status(500).json({ error: "server error" });
-    }
+  return res.json({
+    id: u.id,
+    utorid: u.utorid,
+    name: u.name,
+    email: u.email,
+    role: u.role,
+    activated: u.activated,
+    verified: u.verified,
+    suspicious: u.suspicious
+  });
 });
+
 
 // PATCH /users/me
 app.patch("/users/me", async (req, res) => {
-    if (!req.auth) {
-        return res.status(401).json({ error: "Unauthorized" });
-    }
+  if (!req.auth) return res.status(401).json({ error: "unauthorized" });
 
-    const body = req.body || {};
-    const allowedFields = ["name", "email", "birthday"];
-    const keys = Object.keys(body);
+  const allowed = ["name", "email"];
+  const updates = {};
 
-    // Empty payload -> 400 (Case 33)
-    if (keys.length === 0) {
-        return res.status(400).json({ error: "empty payload" });
-    }
+  for (const key of Object.keys(req.body)) {
+    if (!allowed.includes(key))
+      return res.status(400).json({ error: "invalid field" });
 
-    if (keys.some(k => !allowedFields.includes(k))) {
-        return res.status(400).json({ error: "invalid fields" });
-    }
+    updates[key] = req.body[key];
+  }
 
-    const data = {};
+  if (Object.keys(updates).length === 0)
+    return res.status(400).json({ error: "empty payload" });
 
-    // name
-    if ("name" in body) {
-        if (!isValidName(body.name)) {
-            return res.status(400).json({ error: "invalid name" });
-        }
-        data.name = body.name;
-    }
+  const updated = await prisma.user.update({
+    where: { id: req.auth.id },
+    data: updates
+  });
 
-    // email
-    if ("email" in body) {
-        if (!isValidEmail(body.email)) {
-            return res.status(400).json({ error: "invalid email" });
-        }
-        const existingEmail = await prisma.user.findUnique({
-            where: { email: body.email }
-        });
-        if (existingEmail && existingEmail.id !== req.auth.id) {
-            return res.status(400).json({ error: "email already used" });
-        }
-        data.email = body.email;
-    }
-
-    // birthday: YYYY-MM-DD
-    if ("birthday" in body) {
-        if (typeof body.birthday !== "string") {
-            return res.status(400).json({ error: "invalid birthday" });
-        }
-        const m = body.birthday.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (!m) {
-            return res.status(400).json({ error: "invalid birthday format" });
-        }
-        data.birthday = body.birthday;
-    }
-
-    try {
-        const updated = await prisma.user.update({
-            where: { id: req.auth.id },
-            data
-        });
-
-        return res.json({
-            id: updated.id,
-            utorid: updated.utorid,
-            name: updated.name,
-            email: updated.email,
-            birthday: updated.birthday,
-            role: updated.role,
-            points: updated.points,
-            createdAt: updated.createdAt,
-            lastLogin: updated.lastLogin,
-            verified: updated.verified,
-            avatarUrl: updated.avatarUrl
-        });
-    } catch (e) {
-        console.error(e);
-        return res.status(500).json({ error: "server error" });
-    }
+  return res.json(updated);
 });
+
 
 
 // PATCH /users/me/password
