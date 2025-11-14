@@ -81,12 +81,26 @@ function getRoleRank(role) {
 }
 
 // Helper function to check if user has at least the required role
-function hasRole(req, minRole) {
-  if (!req.auth || !req.auth.role) return false;
-  const userRole = String(req.auth.role).toLowerCase();
-  const userRank = getRoleRank(userRole);
-  const minRank = getRoleRank(minRole);
-  return userRank >= minRank;
+// This checks the DB role, not the token role, for accuracy
+async function hasRole(req, minRole) {
+  if (!req.auth || !req.auth.id) return false;
+  
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.auth.id },
+      select: { role: true }
+    });
+    
+    if (!user) return false;
+    
+    const userRole = String(user.role).toLowerCase();
+    const userRank = getRoleRank(userRole);
+    const minRank = getRoleRank(minRole);
+    return userRank >= minRank;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
 }
 
 function requireClearance(minRole) {
@@ -753,39 +767,136 @@ app.post("/promotions", requireClearance("manager"), async (req, res) => {
 });
 
 app.get("/promotions", async (req, res) => {
-  const isCashier = hasRole(req, "cashier");
-  const now = new Date();
-
-  let where = {};
-
-  if (!isCashier) {
-    where = {
-      type: "automatic",
-      startTime: { lte: now },
-      endTime: { gte: now }
-    };
-  }
-
   try {
-    const promos = await prisma.promotion.findMany({
-      where,
-      orderBy: { startTime: "asc" }
-    });
-
-    if (!isCashier) {
-      return res.json(
-        promos.map((p) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          type: p.type,
-          startTime: p.startTime,
-          endTime: p.endTime
-        }))
-      );
+    if (!req.auth) {
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
-    return res.json(promos);
+    const isManager = await hasRole(req, "manager");
+    const isCashier = await hasRole(req, "cashier");
+    const now = new Date();
+
+    const {
+      name,
+      type,
+      started,
+      ended,
+      page = "1",
+      limit = "10"
+    } = req.query;
+
+    // Managers cannot specify both started and ended
+    if (isManager && typeof started !== "undefined" && typeof ended !== "undefined") {
+      return res.status(400).json({ error: "cannot filter by both started and ended" });
+    }
+
+    // Validate pagination parameters
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    
+    if (isNaN(pageNum) || pageNum < 1) {
+      return res.status(400).json({ error: "invalid page" });
+    }
+    
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+      return res.status(400).json({ error: "invalid limit" });
+    }
+
+    let where = {};
+
+    // Regular users can only see active promotions (automatic or unused one-time)
+    if (!isCashier) {
+      // Filter for active promotions
+      where.startTime = { lte: now };
+      where.endTime = { gte: now };
+      
+      // Note: We'll filter out used one-time promotions after fetching
+      // Prisma doesn't easily support filtering by absence of related records
+    }
+
+    // Manager-only filters
+    if (isManager) {
+      if (typeof started === "string") {
+        const flag = started === "true";
+        where.startTime = flag ? { lte: now } : { gt: now };
+      }
+      if (typeof ended === "string") {
+        const flag = ended === "true";
+        where.endTime = flag ? { lte: now } : { gte: now };
+      }
+    }
+
+    if (typeof name === "string" && name.trim() !== "") {
+      where.name = { contains: name.trim() };
+    }
+
+    if (typeof type === "string" && (type === "automatic" || type === "onetime")) {
+      where.type = type;
+    }
+
+    let promos = [];
+    let count = 0;
+
+    if (!isCashier) {
+      // For regular users, fetch all active promotions with their usage status
+      const allPromos = await prisma.promotion.findMany({
+        where,
+        include: {
+          promotionUsers: {
+            where: { userId: req.auth.id },
+            select: { used: true }
+          }
+        },
+        orderBy: { startTime: "asc" }
+      });
+
+      // Filter out used one-time promotions
+      const filtered = allPromos.filter(p => {
+        if (p.type === "onetime") {
+          // Only show if user hasn't used it yet
+          return p.promotionUsers.length === 0 || !p.promotionUsers[0].used;
+        }
+        return true; // Automatic promotions are always shown if active
+      });
+
+      count = filtered.length;
+      const startIndex = (pageNum - 1) * limitNum;
+      promos = filtered.slice(startIndex, startIndex + limitNum);
+    } else {
+      // Managers/cashiers see all promotions
+      count = await prisma.promotion.count({ where });
+
+      promos = await prisma.promotion.findMany({
+        where,
+        orderBy: { startTime: "asc" },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum
+      });
+    }
+
+    const results = promos.map((p) => {
+      // Remove promotionUsers from response
+      const { promotionUsers, ...promo } = p;
+      
+      const base = {
+        id: promo.id,
+        name: promo.name,
+        type: promo.type,
+        endTime: promo.endTime,
+        minSpending: promo.minSpending,
+        rate: promo.rate,
+        points: promo.points
+      };
+
+      // Managers see startTime
+      if (isManager) {
+        base.startTime = promo.startTime;
+      }
+
+      return base;
+    });
+
+    return res.json({ count, results });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
@@ -793,8 +904,12 @@ app.get("/promotions", async (req, res) => {
 });
 
 app.get("/promotions/:id", async (req, res) => {
+  if (!req.auth) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
   const promoId = Number(req.params.id);
-  if (Number.isNaN(promoId)) {
+  if (Number.isNaN(promoId) || promoId <= 0) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -805,90 +920,179 @@ app.get("/promotions/:id", async (req, res) => {
 
     if (!p) return res.status(404).json({ error: "not found" });
 
-    const isCashier = hasRole(req, "cashier");
+    // Check if user has cashier+ role
+    const isCashier = await hasRole(req, "cashier");
 
     if (!isCashier) {
+      // Regular users can only see active promotions they haven't used
       const now = new Date();
-      const activeAutomatic =
-        p.type === "automatic" &&
-        p.startTime <= now &&
-        p.endTime >= now;
+      const isActive = p.startTime <= now && p.endTime >= now;
 
-      if (!activeAutomatic) {
-        return res.status(403).json({ error: "Forbidden" });
+      if (!isActive) {
+        // Return 404 for inactive promotions (regular users shouldn't know they exist)
+        return res.status(404).json({ error: "not found" });
       }
 
+      // For one-time promotions, check if user has already used it
+      if (p.type === "onetime") {
+        const promotionUser = await prisma.promotionUser.findUnique({
+          where: {
+            promotionId_userId: {
+              promotionId: p.id,
+              userId: req.auth.id
+            }
+          }
+        });
+
+        if (promotionUser && promotionUser.used) {
+          // User has already used this promotion
+          return res.status(404).json({ error: "not found" });
+        }
+      }
+
+      // Regular users see: id, name, description, type, endTime, minSpending, rate, points (no startTime)
       return res.json({
         id: p.id,
         name: p.name,
         description: p.description,
         type: p.type,
-        startTime: p.startTime,
-        endTime: p.endTime
+        endTime: p.endTime,
+        minSpending: p.minSpending,
+        rate: p.rate,
+        points: p.points
       });
     }
 
-    return res.json(p);
+    // Cashiers+ can see all promotions with full details
+    return res.json({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      type: p.type,
+      startTime: p.startTime,
+      endTime: p.endTime,
+      minSpending: p.minSpending,
+      rate: p.rate,
+      points: p.points
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
   }
 });
 
-app.patch("/promotions/:id",requireClearance("manager"),async (req, res) => {
-    const promoId = Number(req.params.id);
-    if (Number.isNaN(promoId)) {
-      return res.status(400).json({ error: "invalid id" });
+app.patch("/promotions/:id", requireClearance("manager"), async (req, res) => {
+  const promoId = Number(req.params.id);
+  if (Number.isNaN(promoId)) {
+    return res.status(400).json({ error: "invalid id" });
+  }
+
+  try {
+    const exists = await prisma.promotion.findUnique({
+      where: { id: promoId }
+    });
+    if (!exists) return res.status(404).json({ error: "not found" });
+
+    const data = { ...req.body };
+    const now = new Date();
+
+    // Cannot update after start time has passed (for name, description, type, startTime, minSpending, rate, points)
+    if (exists.startTime < now) {
+      if (data.name !== undefined || data.description !== undefined || 
+          data.type !== undefined || data.startTime !== undefined || 
+          data.minSpending !== undefined || data.rate !== undefined || 
+          data.points !== undefined) {
+        return res.status(400).json({ error: "cannot update promotion after it has started" });
+      }
     }
 
-    try {
-      const exists = await prisma.promotion.findUnique({
-        where: { id: promoId }
-      });
-      if (!exists) return res.status(404).json({ error: "not found" });
+    // Cannot update endTime after original end time has passed
+    if (exists.endTime < now && data.endTime !== undefined) {
+      return res.status(400).json({ error: "cannot update promotion after it has ended" });
+    }
 
-      const data = { ...req.body };
+    // Cannot set start time or end time in the past
+    if (data.startTime !== undefined && new Date(data.startTime) < now) {
+      return res.status(400).json({ error: "start time cannot be in the past" });
+    }
+    if (data.endTime !== undefined && new Date(data.endTime) < now) {
+      return res.status(400).json({ error: "end time cannot be in the past" });
+    }
 
-      if ((data.startTime || data.endTime) &&
+    // Validate time range
+    if ((data.startTime !== undefined || data.endTime !== undefined) &&
         new Date(data.startTime ?? exists.startTime) >=
           new Date(data.endTime ?? exists.endTime)
-      ) {
-        return res.status(400).json({ error: "invalid time range" });
-      }
-
-      const updated = await prisma.promotion.update({
-        where: { id: promoId },
-        data
-      });
-
-      return res.json(updated);
-    } catch (e) {
-      console.error(e);
-      return res.status(500).json({ error: "server error" });
+    ) {
+      return res.status(400).json({ error: "invalid time range" });
     }
+
+    const updated = await prisma.promotion.update({
+      where: { id: promoId },
+      data
+    });
+
+    // Return only updated fields
+    const response = {
+      id: updated.id,
+      name: updated.name,
+      type: updated.type
+    };
+
+    if (data.endTime !== undefined) {
+      response.endTime = updated.endTime;
+    }
+    if (data.startTime !== undefined) {
+      response.startTime = updated.startTime;
+    }
+    if (data.name !== undefined) {
+      response.name = updated.name;
+    }
+    if (data.description !== undefined) {
+      response.description = updated.description;
+    }
+    if (data.minSpending !== undefined) {
+      response.minSpending = updated.minSpending;
+    }
+    if (data.rate !== undefined) {
+      response.rate = updated.rate;
+    }
+    if (data.points !== undefined) {
+      response.points = updated.points;
+    }
+
+    return res.json(response);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "server error" });
   }
-);
+});
 
-app.delete("/promotions/:id",requireClearance("manager"),async (req, res) => {
-    const promoId = Number(req.params.id);
-    if (Number.isNaN(promoId)) {
-      return res.status(400).json({ error: "invalid id" });
-    }
-
-    try {
-      const exists = await prisma.promotion.findUnique({
-        where: { id: promoId }
-      });
-      if (!exists) return res.status(404).json({ error: "not found" });
-
-      await prisma.promotion.delete({ where: { id: promoId } });
-      return res.json({ status: "ok" });
-    } catch (e) {
-      console.error(e);
-      return res.status(500).json({ error: "server error" });
-    }
+app.delete("/promotions/:id", requireClearance("manager"), async (req, res) => {
+  const promoId = Number(req.params.id);
+  if (Number.isNaN(promoId)) {
+    return res.status(400).json({ error: "invalid id" });
   }
-);
+
+  try {
+    const exists = await prisma.promotion.findUnique({
+      where: { id: promoId }
+    });
+    if (!exists) return res.status(404).json({ error: "not found" });
+
+    // Cannot delete if promotion has started
+    const now = new Date();
+    if (exists.startTime < now) {
+      return res.status(403).json({ error: "cannot delete promotion after it has started" });
+    }
+
+    await prisma.promotion.delete({ where: { id: promoId } });
+    return res.status(204).send();
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "server error" });
+  }
+});
 
 // =====================
 // TRANSACTION helpers
@@ -968,7 +1172,7 @@ app.post("/transactions", async (req, res) => {
 
   // PURCHASE
   if (type === "purchase") {
-    if (!hasRole(req, "cashier")) {
+    if (!(await hasRole(req, "cashier"))) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -1074,7 +1278,7 @@ app.post("/transactions", async (req, res) => {
 
   // ADJUSTMENT
   if (type === "adjustment") {
-    if (!hasRole(req, "manager")) {
+    if (!(await hasRole(req, "manager"))) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -1827,71 +2031,70 @@ app.get("/events", async (req, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const isManager = hasRole(req, "manager");
-
-  const {
-    name,
-    location,
-    started,
-    ended,
-    showFull,
-    page = "1",
-    limit = "10",
-    published, // manager-only filter
-  } = req.query;
-
-  // You can't specify both started and ended at the same time
-  if (typeof started !== "undefined" && typeof ended !== "undefined") {
-    return res.status(400).json({ error: "cannot filter by both started and ended" });
-  }
-
-  const where = {};
-
-  // Managers can see everything, but can filter by published.
-  // Regular users can only see published events.
-  if (isManager) {
-    if (typeof published === "string") {
-      if (published === "true") where.published = true;
-      else if (published === "false") where.published = false;
-    }
-  } else {
-    where.published = true;
-  }
-
-  if (typeof name === "string" && name.trim() !== "") {
-    where.name = { contains: name.trim() };
-  }
-
-  if (typeof location === "string" && location.trim() !== "") {
-    where.location = { contains: location.trim() };
-  }
-
-  const now = new Date();
-
-  if (typeof started === "string") {
-    const flag = started === "true";
-    where.startTime = flag ? { lte: now } : { gt: now };
-  }
-
-  if (typeof ended === "string") {
-    const flag = ended === "true";
-    where.endTime = flag ? { lte: now } : { gt: now };
-  }
-
-  // Validate pagination parameters
-  const pageNum = parseInt(page, 10);
-  const limitNum = parseInt(limit, 10);
-  
-  if (isNaN(pageNum) || pageNum < 1) {
-    return res.status(400).json({ error: "invalid page" });
-  }
-  
-  if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
-    return res.status(400).json({ error: "invalid limit" });
-  }
-
   try {
-    // We need to compute "full" events by counting guests, so we fetch first then filter in JS.
+    const isManager = await hasRole(req, "manager");
+
+    const {
+      name,
+      location,
+      started,
+      ended,
+      showFull,
+      page = "1",
+      limit = "10",
+      published, // manager-only filter
+    } = req.query;
+
+    // You can't specify both started and ended at the same time
+    if (typeof started !== "undefined" && typeof ended !== "undefined") {
+      return res.status(400).json({ error: "cannot filter by both started and ended" });
+    }
+
+    const where = {};
+
+    // Managers can see everything, but can filter by published.
+    // Regular users can only see published events.
+    if (isManager) {
+      if (typeof published === "string") {
+        if (published === "true") where.published = true;
+        else if (published === "false") where.published = false;
+      }
+    } else {
+      where.published = true;
+    }
+
+    if (typeof name === "string" && name.trim() !== "") {
+      where.name = { contains: name.trim() };
+    }
+
+    if (typeof location === "string" && location.trim() !== "") {
+      where.location = { contains: location.trim() };
+    }
+
+    const now = new Date();
+
+    if (typeof started === "string") {
+      const flag = started === "true";
+      where.startTime = flag ? { lte: now } : { gt: now };
+    }
+
+    if (typeof ended === "string") {
+      const flag = ended === "true";
+      where.endTime = flag ? { lte: now } : { gt: now };
+    }
+
+    // Validate pagination parameters
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    
+    if (isNaN(pageNum) || pageNum < 1) {
+      return res.status(400).json({ error: "invalid page" });
+    }
+    
+    if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+      return res.status(400).json({ error: "invalid limit" });
+    }
+    
     const allEvents = await prisma.event.findMany({
       where,
       include: { guests: true },
@@ -1954,7 +2157,7 @@ app.get("/events/:eventId", async (req, res) => {
   }
 
   const eventId = Number(req.params.eventId);
-  if (Number.isNaN(eventId)) {
+  if (Number.isNaN(eventId) || eventId <= 0) {
     return res.status(400).json({ error: "invalid id" });
   }
 
@@ -1972,7 +2175,7 @@ app.get("/events/:eventId", async (req, res) => {
     }
 
     const { id: userId } = req.auth;
-    const isManager = hasRole(req, "manager");
+    const isManager = await hasRole(req, "manager");
     const isOrganizer = event.organizers.some((o) => o.userId === userId);
 
     // Regular user view (not manager and not organizer)
@@ -1995,14 +2198,7 @@ app.get("/events/:eventId", async (req, res) => {
           utorid: o.user.utorid,
           name: o.user.name,
         })),
-        guests: event.guests.map((g) => ({
-          id: g.user.id,
-          utorid: g.user.utorid,
-          name: g.user.name,
-        })),
-        pointsRemain: null,
-        pointsAwarded: null,
-        published: event.published,
+        numGuests: event.guests.length
       });
     }
 
@@ -2035,7 +2231,9 @@ app.get("/events/:eventId", async (req, res) => {
   }
 });
 
-app.patch("/events/:id", requireClearance("manager"), async (req, res) => {
+app.patch("/events/:id", async (req, res) => {
+  if (!req.auth) return res.status(401).json({ error: "Unauthorized" });
+
   const eventId = Number(req.params.id);
   if (Number.isNaN(eventId)) {
     return res.status(400).json({ error: "invalid id" });
@@ -2044,11 +2242,25 @@ app.patch("/events/:id", requireClearance("manager"), async (req, res) => {
   try {
     const event = await prisma.event.findUnique({ 
       where: { id: eventId },
-      include: { guests: true }
+      include: { guests: true, organizers: true }
     });
     if (!event) return res.status(404).json({ error: "not found" });
 
+    const isManager = await hasRole(req, "manager");
+    const isOrganizer = event.organizers.some(o => o.userId === req.auth.id);
+
+    if (!isManager && !isOrganizer) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
     const data = { ...req.body };
+
+    // Only managers can update points and published
+    if (!isManager) {
+      if (data.points !== undefined || data.published !== undefined) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
 
     // Validate time range
     if (
@@ -2082,10 +2294,27 @@ app.patch("/events/:id", requireClearance("manager"), async (req, res) => {
       }
     }
 
-    // Cannot update name/description after event has ended
+    // Cannot update name/description/location/startTime/capacity after start time has passed
     const now = new Date();
-    if (event.endTime < now && (data.name !== undefined || data.description !== undefined)) {
+    if (event.startTime < now) {
+      if (data.name !== undefined || data.description !== undefined || 
+          data.location !== undefined || data.startTime !== undefined || 
+          data.capacity !== undefined) {
+        return res.status(400).json({ error: "cannot update event after it has started" });
+      }
+    }
+
+    // Cannot update endTime after original end time has passed
+    if (event.endTime < now && data.endTime !== undefined) {
       return res.status(400).json({ error: "cannot update event after it has ended" });
+    }
+
+    // Cannot update startTime or endTime if new times are in the past
+    if (data.startTime !== undefined && new Date(data.startTime) < now) {
+      return res.status(400).json({ error: "start time cannot be in the past" });
+    }
+    if (data.endTime !== undefined && new Date(data.endTime) < now) {
+      return res.status(400).json({ error: "end time cannot be in the past" });
     }
 
     const updated = await prisma.event.update({
@@ -2152,7 +2381,7 @@ app.delete("/events/:id", requireClearance("manager"), async (req, res) => {
 
     await prisma.event.delete({ where: { id: eventId } });
 
-    return res.json({ status: "ok" });
+    return res.status(204).send();
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
@@ -2165,17 +2394,26 @@ app.post(
   requireClearance("manager"),
   async (req, res) => {
     const eventId = Number(req.params.id);
-    const { userId } = req.body || {};
+    const { utorid } = req.body || {};
 
-    if (Number.isNaN(eventId) || typeof userId !== "number") {
+    if (Number.isNaN(eventId) || typeof utorid !== "string" || !utorid.trim()) {
       return res.status(400).json({ error: "invalid payload" });
     }
 
     try {
-      const user = await prisma.user.findUnique({ where: { id: userId } });
-      const event = await prisma.event.findUnique({ where: { id: eventId } });
+      const user = await prisma.user.findUnique({ where: { utorid: utorid.trim() } });
+      const event = await prisma.event.findUnique({ 
+        where: { id: eventId },
+        include: { organizers: true, guests: true }
+      });
 
       if (!user || !event) return res.status(404).json({ error: "not found" });
+
+      // Check if user is already a guest (400 error)
+      const isGuest = event.guests.some(g => g.userId === user.id);
+      if (isGuest) {
+        return res.status(400).json({ error: "user is already a guest" });
+      }
 
       // Check if event has ended
       const now = new Date();
@@ -2184,12 +2422,31 @@ app.post(
       }
 
       const o = await prisma.organizer.upsert({
-        where: { userId_eventId: { userId, eventId } },
+        where: { userId_eventId: { userId: user.id, eventId } },
         update: {},
-        create: { userId, eventId }
+        create: { userId: user.id, eventId }
       });
 
-      return res.status(201).json(o);
+      // Fetch updated event with organizers
+      const updatedEvent = await prisma.event.findUnique({
+        where: { id: eventId },
+        include: {
+          organizers: {
+            include: { user: true }
+          }
+        }
+      });
+
+      return res.status(201).json({
+        id: updatedEvent.id,
+        name: updatedEvent.name,
+        location: updatedEvent.location,
+        organizers: updatedEvent.organizers.map(o => ({
+          id: o.user.id,
+          utorid: o.user.utorid,
+          name: o.user.name
+        }))
+      });
     } catch (e) {
       console.error(e);
       return res.status(500).json({ error: "server error" });
@@ -2198,14 +2455,14 @@ app.post(
 );
 
 app.delete(
-  "/events/:id/organizers",
+  "/events/:id/organizers/:userId",
   requireClearance("manager"),
   async (req, res) => {
     const eventId = Number(req.params.id);
-    const { userId } = req.body || {};
+    const userId = Number(req.params.userId);
 
-    if (Number.isNaN(eventId) || typeof userId !== "number") {
-      return res.status(400).json({ error: "invalid payload" });
+    if (Number.isNaN(eventId) || Number.isNaN(userId)) {
+      return res.status(400).json({ error: "invalid id" });
     }
 
     try {
@@ -2213,9 +2470,13 @@ app.delete(
         where: { userId_eventId: { userId, eventId } }
       });
 
-      return res.json({ status: "ok" });
-    } catch {
-      return res.status(404).json({ error: "organizer not found" });
+      return res.status(204).send();
+    } catch (e) {
+      if (e.code === "P2025") {
+        return res.status(404).json({ error: "organizer not found" });
+      }
+      console.error(e);
+      return res.status(500).json({ error: "server error" });
     }
   }
 );
@@ -2223,9 +2484,9 @@ app.delete(
 // guests – add/remove by organizer or manager
 app.post("/events/:id/guests", async (req, res) => {
   const eventId = Number(req.params.id);
-  const { userId } = req.body || {};
+  const { utorid } = req.body || {};
 
-  if (Number.isNaN(eventId) || typeof userId !== "number") {
+  if (Number.isNaN(eventId) || typeof utorid !== "string" || !utorid.trim()) {
     return res.status(400).json({ error: "invalid payload" });
   }
 
@@ -2234,15 +2495,34 @@ app.post("/events/:id/guests", async (req, res) => {
   }
 
   try {
-    const isManager = hasRole(req, "manager");
+    const isManager = await hasRole(req, "manager");
     const isOrg = await isOrganizer(eventId, req.auth.id);
 
     if (!isManager && !isOrg) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    const event = await prisma.event.findUnique({ where: { id: eventId } });
-    if (!event) return res.status(404).json({ error: "not found" });
+    // For organizers, check if event is published (404 if not visible yet)
+    if (isOrg && !isManager) {
+      const event = await prisma.event.findUnique({ where: { id: eventId } });
+      if (!event || !event.published) {
+        return res.status(404).json({ error: "not found" });
+      }
+    }
+
+    const user = await prisma.user.findUnique({ where: { utorid: utorid.trim() } });
+    const event = await prisma.event.findUnique({ 
+      where: { id: eventId },
+      include: { organizers: true, guests: true }
+    });
+
+    if (!user || !event) return res.status(404).json({ error: "not found" });
+
+    // Check if user is already an organizer (400 error)
+    const isOrganizerUser = event.organizers.some(o => o.userId === user.id);
+    if (isOrganizerUser) {
+      return res.status(400).json({ error: "user is already an organizer" });
+    }
 
     // Check if event has ended
     const now = new Date();
@@ -2250,52 +2530,58 @@ app.post("/events/:id/guests", async (req, res) => {
       return res.status(410).json({ error: "event has ended" });
     }
 
+    // Check if event is full
     if (event.capacity !== null && typeof event.capacity === "number" && event.capacity > 0) {
-      const count = await prisma.guest.count({ where: { eventId } });
-      if (count >= event.capacity) {
+      if (event.guests.length >= event.capacity) {
         return res.status(410).json({ error: "event full" });
       }
     }
 
     const g = await prisma.guest.upsert({
-      where: { userId_eventId: { userId, eventId } },
+      where: { userId_eventId: { userId: user.id, eventId } },
       update: {},
-      create: { userId, eventId }
+      create: { userId: user.id, eventId }
     });
 
-    return res.status(201).json(g);
+    // Get updated guest count
+    const guestCount = await prisma.guest.count({ where: { eventId } });
+
+    return res.status(201).json({
+      id: event.id,
+      name: event.name,
+      location: event.location,
+      guestAdded: {
+        id: user.id,
+        utorid: user.utorid,
+        name: user.name
+      },
+      numGuests: guestCount
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
   }
 });
 
-app.delete("/events/:id/guests", async (req, res) => {
+app.delete("/events/:id/guests/:userId", requireClearance("manager"), async (req, res) => {
   const eventId = Number(req.params.id);
-  const { userId } = req.body || {};
+  const userId = Number(req.params.userId);
 
-  if (Number.isNaN(eventId) || typeof userId !== "number") {
-    return res.status(400).json({ error: "invalid payload" });
-  }
-
-  if (!req.auth) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
-
-  const isManager = hasRole(req, "manager");
-  const isOrg = await isOrganizer(eventId, req.auth.id);
-
-  if (!isManager && !isOrg) {
-    return res.status(403).json({ error: "Forbidden" });
+  if (Number.isNaN(eventId) || Number.isNaN(userId)) {
+    return res.status(400).json({ error: "invalid id" });
   }
 
   try {
     await prisma.guest.delete({
       where: { userId_eventId: { userId, eventId } }
     });
-    return res.json({ status: "ok" });
-  } catch {
-    return res.status(404).json({ error: "guest not found" });
+    return res.status(204).send();
+  } catch (e) {
+    if (e.code === "P2025") {
+      return res.status(404).json({ error: "guest not found" });
+    }
+    console.error(e);
+    return res.status(500).json({ error: "server error" });
   }
 });
 
@@ -2315,7 +2601,7 @@ app.post("/events/:id/guests/me", async (req, res) => {
     if (!event) return res.status(404).json({ error: "not found" });
 
     if (!event.published) {
-      return res.status(403).json({ error: "event not published" });
+      return res.status(404).json({ error: "not found" });
     }
 
     // Check if event has ended
@@ -2324,21 +2610,48 @@ app.post("/events/:id/guests/me", async (req, res) => {
       return res.status(410).json({ error: "event has ended" });
     }
 
+    // Check if already a guest
+    const existingGuest = await prisma.guest.findUnique({
+      where: { userId_eventId: { userId, eventId } }
+    });
+    if (existingGuest) {
+      return res.status(400).json({ error: "already on guest list" });
+    }
+
+    // Check if event is full
     if (event.capacity !== null && typeof event.capacity === "number" && event.capacity > 0) {
       const count = await prisma.guest.count({ where: { eventId } });
       if (count >= event.capacity) {
-        return res.status(400).json({ error: "event full" });
+        return res.status(410).json({ error: "event full" });
       }
     }
 
-    const g = await prisma.guest.upsert({
-      where: { userId_eventId: { userId, eventId } },
-      update: {},
-      create: { userId, eventId }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: "not found" });
+
+    const g = await prisma.guest.create({
+      data: { userId, eventId }
     });
 
-    return res.status(201).json(g);
+    // Get updated guest count
+    const guestCount = await prisma.guest.count({ where: { eventId } });
+
+    return res.status(201).json({
+      id: event.id,
+      name: event.name,
+      location: event.location,
+      guestAdded: {
+        id: user.id,
+        utorid: user.utorid,
+        name: user.name
+      },
+      numGuests: guestCount
+    });
   } catch (e) {
+    if (e.code === "P2002") {
+      // Unique constraint violation - already a guest
+      return res.status(400).json({ error: "already on guest list" });
+    }
     console.error(e);
     return res.status(500).json({ error: "server error" });
   }
@@ -2383,75 +2696,152 @@ app.post("/events/:id/transactions", async (req, res) => {
   if (!req.auth) return res.status(401).json({ error: "Unauthorized" });
 
   const eventId = Number(req.params.id);
-  const { userId, amount, remark } = req.body || {};
+  const { type, utorid, amount, remark } = req.body || {};
 
   // Validate eventId first (needed for auth check)
   if (Number.isNaN(eventId)) {
     return res.status(400).json({ error: "invalid id" });
   }
 
+  // Validate type
+  if (type !== "event") {
+    return res.status(400).json({ error: "type must be event" });
+  }
+
   // Check auth
-  const isManager = hasRole(req, "manager");
+  const isManager = await hasRole(req, "manager");
   const isOrg = await isOrganizer(eventId, req.auth.id);
 
   if (!isManager && !isOrg) {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  // Then validate rest of payload
-  if (
-    typeof userId !== "number" ||
-    typeof amount !== "number" ||
-    amount <= 0
-  ) {
-    return res.status(400).json({ error: "invalid payload" });
+  // Validate amount
+  if (typeof amount !== "number" || amount <= 0 || !Number.isInteger(amount)) {
+    return res.status(400).json({ error: "invalid amount" });
   }
 
   try {
-    const event = await prisma.event.findUnique({ where: { id: eventId } });
+    const event = await prisma.event.findUnique({ 
+      where: { id: eventId },
+      include: { guests: true }
+    });
     if (!event) return res.status(404).json({ error: "not found" });
 
-    const guest = await prisma.guest.findUnique({
-      where: { userId_eventId: { userId, eventId } }
-    });
+    // If utorid is provided, award to that specific user
+    if (utorid !== undefined && utorid !== null) {
+      if (typeof utorid !== "string" || !utorid.trim()) {
+        return res.status(400).json({ error: "invalid utorid" });
+      }
 
-    if (!guest) {
-      return res.status(400).json({ error: "user not a guest" });
-    }
+      const user = await prisma.user.findUnique({ where: { utorid: utorid.trim() } });
+      if (!user) return res.status(404).json({ error: "user not found" });
 
-    if (event.pointsRemain < amount) {
-      return res.status(400).json({ error: "not enough points remaining" });
-    }
+      const guest = event.guests.find(g => g.userId === user.id);
+      if (!guest) {
+        return res.status(400).json({ error: "user not a guest" });
+      }
 
-    const created = await prisma.$transaction(async (tx) => {
-      const t = await tx.transaction.create({
-        data: {
-          type: "event",
-          amount,
-          remark: remark || "",
-          ownerId: userId,
-          createdBy: req.auth.id,
-          relatedId: eventId
+      if (event.pointsRemain < amount) {
+        return res.status(400).json({ error: "not enough points remaining" });
+      }
+
+      const created = await prisma.$transaction(async (tx) => {
+        const t = await tx.transaction.create({
+          data: {
+            type: "event",
+            amount,
+            remark: remark || "",
+            ownerId: user.id,
+            createdBy: req.auth.id,
+            relatedId: eventId
+          }
+        });
+
+        await tx.user.update({
+          where: { id: user.id },
+          data: { points: { increment: amount } }
+        });
+
+        await tx.event.update({
+          where: { id: eventId },
+          data: {
+            pointsRemain: { decrement: amount },
+            pointsAwarded: { increment: amount }
+          }
+        });
+
+        return t;
+      });
+
+      const creator = await prisma.user.findUnique({ where: { id: req.auth.id } });
+
+      return res.status(201).json({
+        id: created.id,
+        recipient: user.utorid,
+        awarded: amount,
+        type: "event",
+        relatedId: eventId,
+        remark: created.remark || "",
+        createdBy: creator.utorid
+      });
+    } else {
+      // Award to all guests
+      if (event.guests.length === 0) {
+        return res.status(400).json({ error: "no guests to award" });
+      }
+
+      const totalAmount = amount * event.guests.length;
+      if (event.pointsRemain < totalAmount) {
+        return res.status(400).json({ error: "not enough points remaining" });
+      }
+
+      const creator = await prisma.user.findUnique({ where: { id: req.auth.id } });
+      const results = await prisma.$transaction(async (tx) => {
+        const transactions = [];
+
+        for (const guest of event.guests) {
+          const t = await tx.transaction.create({
+            data: {
+              type: "event",
+              amount,
+              remark: remark || "",
+              ownerId: guest.userId,
+              createdBy: req.auth.id,
+              relatedId: eventId
+            },
+            include: { owner: true }
+          });
+
+          await tx.user.update({
+            where: { id: guest.userId },
+            data: { points: { increment: amount } }
+          });
+
+          transactions.push({
+            id: t.id,
+            recipient: t.owner.utorid,
+            awarded: amount,
+            type: "event",
+            relatedId: eventId,
+            remark: t.remark || "",
+            createdBy: creator.utorid
+          });
         }
+
+        await tx.event.update({
+          where: { id: eventId },
+          data: {
+            pointsRemain: { decrement: totalAmount },
+            pointsAwarded: { increment: totalAmount }
+          }
+        });
+
+        return transactions;
       });
 
-      await tx.user.update({
-        where: { id: userId },
-        data: { points: { increment: amount } }
-      });
-
-      await tx.event.update({
-        where: { id: eventId },
-        data: {
-          pointsRemain: { decrement: amount },
-          pointsAwarded: { increment: amount }
-        }
-      });
-
-      return t;
-    });
-
-    return res.status(201).json(created);
+      return res.status(201).json(results);
+    }
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
