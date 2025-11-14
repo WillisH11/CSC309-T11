@@ -162,39 +162,41 @@ app.post("/auth/tokens", async (req, res) => {
 
 // request password reset
 app.post("/auth/resets", async (req, res) => {
-  const ip = req.ip;
-  const now = Date.now();
-
-  if (resetLimiter[ip] && now - resetLimiter[ip] < 60000) {
-    return res.status(429).json({ error: "Too Many Requests" });
-  }
-  resetLimiter[ip] = now;
-
   const { utorid } = req.body || {};
+
   if (!utorid || typeof utorid !== "string") {
     return res.status(400).json({ error: "utorid required" });
   }
 
   try {
+    const user = await prisma.user.findUnique({ where: { utorid } });
+
+    if (!user) {
+      return res.status(404).json({ error: "user not found" });
+    }
+
+    const ip = req.ip;
+    const now = Date.now();
+    const last = resetLimiter[ip] || 0;
+    if (now - last < 60_000) {
+      return res.status(429).json({ error: "Too Many Requests" });
+    }
+    resetLimiter[ip] = now;
+
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
     const resetToken = uuidv4();
 
-    const user = await prisma.user.findUnique({ where: { utorid } });
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetToken,
+        resetTokenExp: expiresAt,
+      },
+    });
 
-    if (user) {
-      await prisma.user.update({
-        where: { id: user.id },
-        data: {
-          resetToken,
-          resetTokenExp: expiresAt
-        }
-      });
-    }
-
-    // Always 202 with token in body (per spec for assignment)
     return res.status(202).json({
       expiresAt,
-      resetToken
+      resetToken,
     });
   } catch (err) {
     console.error(err);
@@ -208,16 +210,14 @@ app.post("/auth/resets/:resetToken", async (req, res) => {
   const { utorid, password } = req.body || {};
 
   if (!utorid || !password) {
-    return res.status(400).json({ error: "utorid and password required" });
-  }
-
-  if (!validatePasswordComplexity(password)) {
-    return res.status(400).json({ error: "invalid password format" });
+    return res
+      .status(400)
+      .json({ error: "utorid and password required" });
   }
 
   try {
     const user = await prisma.user.findFirst({
-      where: { resetToken, utorid }
+      where: { resetToken },
     });
 
     if (!user) {
@@ -228,6 +228,10 @@ app.post("/auth/resets/:resetToken", async (req, res) => {
       return res.status(410).json({ error: "reset token expired" });
     }
 
+    if (user.utorid !== utorid) {
+      return res.status(401).json({ error: "utorid mismatch" });
+    }
+
     const hashed = await bcrypt.hash(password, 10);
 
     await prisma.user.update({
@@ -236,11 +240,11 @@ app.post("/auth/resets/:resetToken", async (req, res) => {
         password: hashed,
         activated: true,
         resetToken: null,
-        resetTokenExp: null
-      }
+        resetTokenExp: null,
+      },
     });
 
-    return res.json({ status: "ok" });
+    return res.status(200).json({ status: "ok" });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "server error" });
@@ -306,71 +310,86 @@ app.post("/users", requireClearance("cashier"), async (req, res) => {
 
 // GET /users (Manager or higher, with filters & pagination)
 app.get("/users", requireClearance("manager"), async (req, res) => {
-  const {
-    name,
-    role,
-    verified,
-    activated,
-    page,
-    limit
-  } = req.query;
-
-  const where = {};
-
-  if (name && typeof name === "string") {
-    where.OR = [
-      { utorid: { contains: name, mode: "insensitive" } },
-      { name: { contains: name, mode: "insensitive" } }
-    ];
-  }
-
-  if (role && typeof role === "string") {
-    where.role = role;
-  }
-
-  if (verified !== undefined) {
-    if (verified === "true" || verified === true) where.verified = true;
-    else if (verified === "false" || verified === false) where.verified = false;
-  }
-
-  if (activated !== undefined) {
-    if (activated === "true" || activated === true) {
-      where.lastLogin = { not: null };
-    } else if (activated === "false" || activated === false) {
-      where.lastLogin = null;
-    }
-  }
-
-  const pageNum = Number(page) > 0 ? Number(page) : 1;
-  const limitNum = Number(limit) > 0 ? Number(limit) : 10;
-  const skip = (pageNum - 1) * limitNum;
-
   try {
-    const count = await prisma.user.count({ where });
-    const results = await prisma.user.findMany({
-      where,
-      orderBy: { id: "asc" },
-      skip,
-      take: limitNum
-    });
+    let {
+      name,
+      role,
+      verified,
+      activated,
+      page = "1",
+      limit = "10",
+    } = req.query;
 
-    const mapped = results.map((u) => ({
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+
+    if (
+      Number.isNaN(pageNum) ||
+      Number.isNaN(limitNum) ||
+      pageNum < 1 ||
+      limitNum < 1
+    ) {
+      return res.status(400).json({ error: "invalid page or limit" });
+    }
+
+    const where = {};
+
+    // Filter by name (utorid OR name contains substring)
+    if (name && typeof name === "string" && name.trim() !== "") {
+      where.OR = [
+        { utorid: { contains: name, mode: "insensitive" } },
+        { name: { contains: name, mode: "insensitive" } },
+      ];
+    }
+
+    // Filter by role
+    if (role && typeof role === "string") {
+      where.role = role;
+    }
+
+    // verified: 'true'/'false'
+    if (verified !== undefined) {
+      if (verified !== "true" && verified !== "false") {
+        return res.status(400).json({ error: "invalid verified" });
+      }
+      where.verified = verified === "true";
+    }
+
+    // activated: spec says “whether the user has ever logged in before”; we’ll just map to our `activated` boolean.
+    if (activated !== undefined) {
+      if (activated !== "true" && activated !== "false") {
+        return res.status(400).json({ error: "invalid activated" });
+      }
+      where.activated = activated === "true";
+    }
+
+    const [count, users] = await prisma.$transaction([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        orderBy: { id: "asc" },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+      }),
+    ]);
+
+    const results = users.map((u) => ({
       id: u.id,
       utorid: u.utorid,
       name: u.name,
       email: u.email,
-      birthday: u.birthday || null,
+      birthday: u.birthday,
       role: u.role,
       points: u.points,
       createdAt: u.createdAt,
       lastLogin: u.lastLogin,
       verified: u.verified,
-      avatarUrl: u.avatarUrl || null
+      avatarUrl: u.avatarUrl,
     }));
 
-    return res.json({ count, results: mapped });
-  } catch (e) {
-    console.error(e);
+    return res.json({ count, results });
+  } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: "server error" });
   }
 });
@@ -404,116 +423,177 @@ async function getAvailableOneTimePromotionsForUser(userId) {
 // GET /users/:id (Cashier or higher)
 app.get("/users/:id", requireClearance("cashier"), async (req, res) => {
   const userId = Number(req.params.id);
-  if (Number.isNaN(userId)) {
-    return res.status(400).json({ error: "invalid id" });
-  }
 
   try {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return res.status(404).json({ error: "not found" });
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        promotionUses: {
+          include: { promotion: true },
+        },
+      },
+    });
 
-    const promotions = await getAvailableOneTimePromotionsForUser(user.id);
+    if (!target) {
+      return res.status(404).json({ error: "not found" });
+    }
+
+    const now = new Date();
+    const availableOneTimes = await prisma.promotion.findMany({
+      where: {
+        type: "onetime",
+        startTime: { lte: now },
+        endTime: { gte: now },
+        promotionUsers: {
+          none: {
+            userId: target.id,
+            used: true,
+          },
+        },
+      },
+    });
+
+    const promotions = availableOneTimes.map((p) => ({
+      id: p.id,
+      name: p.name,
+      minSpending: p.minSpending,
+      rate: p.rate,
+      points: p.points,
+    }));
+
+    const isManager = roleRank[req.auth.role] >= roleRank["manager"];
+
+    if (!isManager) {
+      return res.json({
+        id: target.id,
+        utorid: target.utorid,
+        name: target.name,
+        points: target.points,
+        verified: target.verified,
+        promotions,
+      });
+    }
 
     return res.json({
-      id: user.id,
-      utorid: user.utorid,
-      name: user.name,
-      points: user.points,
-      verified: user.verified,
-      promotions
+      id: target.id,
+      utorid: target.utorid,
+      name: target.name,
+      email: target.email,
+      birthday: target.birthday,
+      role: target.role,
+      points: target.points,
+      createdAt: target.createdAt,
+      lastLogin: target.lastLogin,
+      verified: target.verified,
+      avatarUrl: target.avatarUrl,
+      promotions,
     });
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: "server error" });
   }
 });
+
 
 // PATCH /users/:id (Manager or higher)
 app.patch("/users/:id", requireClearance("manager"), async (req, res) => {
-  const userId = Number(req.params.id);
-  if (Number.isNaN(userId)) {
-    return res.status(400).json({ error: "invalid id" });
-  }
-
-  const allowedFields = ["verified", "suspicious", "role"];
-  const keys = Object.keys(req.body || {});
-  if (keys.length === 0) {
-    return res.status(400).json({ error: "no fields to update" });
-  }
-  if (keys.some((k) => !allowedFields.includes(k))) {
-    return res.status(400).json({ error: "invalid fields" });
-  }
+  const targetId = Number(req.params.id);
 
   try {
-    const target = await prisma.user.findUnique({ where: { id: userId } });
-    if (!target) return res.status(404).json({ error: "not found" });
+    const target = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!target) {
+      return res.status(404).json({ error: "not found" });
+    }
+
+    const actingRole = req.auth.role;
+    const allowedFields = ["email", "verified", "suspicious", "role"];
+    const incomingKeys = Object.keys(req.body || {});
+
+    if (incomingKeys.length === 0) {
+      return res.status(400).json({ error: "empty payload" });
+    }
+
+    // No extra fields allowed
+    if (!incomingKeys.every((k) => allowedFields.includes(k))) {
+      return res.status(400).json({ error: "invalid fields in payload" });
+    }
 
     const data = {};
 
-    if ("verified" in req.body) {
-      if (typeof req.body.verified !== "boolean") {
-        return res.status(400).json({ error: "invalid verified" });
+    if ("email" in req.body) {
+      const email = req.body.email;
+      if (typeof email !== "string" || !email.endsWith("@mail.utoronto.ca")) {
+        return res.status(400).json({ error: "invalid email" });
       }
-      data.verified = req.body.verified;
+      data.email = email;
+    }
+
+    if ("verified" in req.body) {
+      const v = req.body.verified;
+      if (typeof v !== "boolean" || v === false) {
+        // spec: verified should always be set to true when updating
+        return res.status(400).json({ error: "verified must be true" });
+      }
+      data.verified = true;
     }
 
     if ("suspicious" in req.body) {
-      if (typeof req.body.suspicious !== "boolean") {
-        return res.status(400).json({ error: "invalid suspicious" });
+      const s = req.body.suspicious;
+      if (typeof s !== "boolean") {
+        return res.status(400).json({ error: "suspicious must be boolean" });
       }
-      data.suspicious = req.body.suspicious;
-      // If we were also promoting to cashier, ensure suspicious false handled below
+      data.suspicious = s;
     }
 
     if ("role" in req.body) {
-      const desiredRole = req.body.role;
-      const requesterRank = roleRank[req.auth.role];
-
-      // manager can only assign regular or cashier
-      if (req.auth.role === "manager") {
-        if (desiredRole !== "regular" && desiredRole !== "cashier") {
-          return res.status(400).json({ error: "invalid role for manager" });
-        }
-      }
-      // superuser can assign any role, but we don't need extra restrictions
-      if (!roleRank[desiredRole]) {
+      const newRole = req.body.role;
+      if (
+        newRole !== "regular" &&
+        newRole !== "cashier" &&
+        newRole !== "manager" &&
+        newRole !== "superuser"
+      ) {
         return res.status(400).json({ error: "invalid role" });
       }
 
-      // when promoting to cashier, suspicious must be false
-      if (
-        desiredRole === "cashier" &&
-        (data.suspicious === true || target.suspicious)
-      ) {
+      if (actingRole === "manager") {
+        // Managers can only toggle between cashier and regular
+        if (newRole !== "regular" && newRole !== "cashier") {
+          return res.status(403).json({ error: "insufficient clearance" });
+        }
+      }
+      // When promoting to cashier, suspicious must be false
+      if (newRole === "cashier" && (target.suspicious || data.suspicious)) {
         return res
           .status(400)
-          .json({ error: "suspicious user cannot be cashier" });
+          .json({ error: "suspicious users cannot be cashiers" });
       }
 
-      data.role = desiredRole;
+      data.role = newRole;
     }
 
     const updated = await prisma.user.update({
-      where: { id: userId },
-      data
+      where: { id: targetId },
+      data,
     });
 
+    // Response: only the updated fields + id + utorid + name
     const response = {
       id: updated.id,
       utorid: updated.utorid,
-      name: updated.name
+      name: updated.name,
     };
-
-    if ("verified" in data) response.verified = updated.verified;
-    if ("suspicious" in data) response.suspicious = updated.suspicious;
-    if ("role" in data) response.role = updated.role;
+    for (const k of Object.keys(data)) {
+      response[k] = updated[k];
+    }
 
     return res.json(response);
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     return res.status(500).json({ error: "server error" });
   }
 });
+
 
 // GET /users/me
 app.get("/users/me", async (req, res) => {
@@ -606,44 +686,35 @@ app.patch("/users/me", async (req, res) => {
 });
 
 // PATCH /users/me/password
-app.patch("/users/me/password", async (req, res) => {
-  if (!req.auth) return res.status(401).json({ error: "Unauthorized" });
-
+app.patch("/users/me/password", requireClearance("regular"), async (req, res) => {
   const { old, new: newPassword } = req.body || {};
 
   if (!old || !newPassword) {
-    return res.status(400).json({ error: "missing fields" });
+    return res.status(400).json({ error: "old and new required" });
   }
 
-  if (!validatePasswordComplexity(newPassword)) {
-    return res.status(400).json({ error: "invalid password format" });
+  const user = await prisma.user.findUnique({
+    where: { id: req.auth.id },
+  });
+
+  if (!user || !user.password) {
+    return res.status(403).json({ error: "incorrect password" });
   }
 
-  try {
-    const me = await prisma.user.findUnique({
-      where: { id: req.auth.id }
-    });
-
-    if (!me || !me.password) {
-      return res.status(403).json({ error: "incorrect password" });
-    }
-
-    const match = await bcrypt.compare(old, me.password);
-    if (!match) return res.status(403).json({ error: "incorrect password" });
-
-    const hashed = await bcrypt.hash(newPassword, 10);
-
-    await prisma.user.update({
-      where: { id: me.id },
-      data: { password: hashed }
-    });
-
-    return res.json({ status: "ok" });
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: "server error" });
+  const match = await bcrypt.compare(old, user.password);
+  if (!match) {
+    return res.status(403).json({ error: "incorrect password" });
   }
+
+  const hashed = await bcrypt.hash(newPassword, 10);
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { password: hashed },
+  });
+
+  return res.status(200).json({});
 });
+
 
 // ====================
 // PROMOTIONS
