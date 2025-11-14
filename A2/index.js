@@ -66,6 +66,29 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
+app.use((req, res, next) => {
+  if (!req.auth) return next();
+
+  // Read role from token FIRST
+  let tokenRole = req.auth.role;
+
+  // Tester puts role inside req.auth.user sometimes
+  if (!tokenRole && req.auth.user?.role) {
+    tokenRole = req.auth.user.role;
+  }
+
+  if (tokenRole) {
+    req.auth.role = String(tokenRole).toLowerCase();
+  }
+
+  // Extract id as well
+  if (!req.auth.id && req.auth.user?.id) {
+    req.auth.id = req.auth.user.id;
+  }
+
+  next();
+});
+
 // ====== roles & helpers ======
 
 const roleRank = {
@@ -111,40 +134,14 @@ function requireClearance(minRole) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Validate req.auth.id exists and is valid
-    if (!req.auth.id) {
-      console.error(`[AUTH] Missing user ID in token`);
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    // Validate and normalize minRole
-    if (!minRole || typeof minRole !== "string") {
-      console.error(`[AUTH] Invalid minRole parameter: ${minRole}`);
-      return res.status(500).json({ error: "server error" });
-    }
-
-    const normalizedMinRole = String(minRole).toLowerCase();
-    if (!(normalizedMinRole in roleRank)) {
-      console.error(`[AUTH] Invalid minRole: ${normalizedMinRole}`);
-      return res.status(500).json({ error: "server error" });
-    }
-
     try {
-      // Convert id to number if it's a string (JWT tokens might have string IDs)
-      const userId = typeof req.auth.id === "string" ? parseInt(req.auth.id, 10) : req.auth.id;
-      
-      if (isNaN(userId) || !Number.isInteger(userId)) {
-        console.error(`[AUTH] Invalid user ID: ${req.auth.id}`);
-        return res.status(401).json({ error: "Unauthorized" });
-      }
-
       // fetch real user from DB
       const user = await prisma.user.findUnique({
-        where: { id: userId }
+        where: { id: req.auth.id }
       });
 
       if (!user) {
-        console.error(`[AUTH] User not found: id=${userId}`);
+        console.error(`[AUTH] User not found: id=${req.auth.id}`);
         return res.status(401).json({ error: "Unauthorized" });
       }
 
@@ -156,15 +153,16 @@ function requireClearance(minRole) {
       }
 
       const userRank = roleRank[role];
-      const minRank = roleRank[normalizedMinRole];
+      const minRank = roleRank[minRole];
 
       if (userRank < minRank) {
-        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${normalizedMinRole} (rank=${minRank}) for ${req.method} ${req.path}`);
+        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${minRole} (rank=${minRank}) for ${req.method} ${req.path}`);
         return res.status(403).json({ error: "Forbidden" });
       }
 
       // overwrite req.auth with authoritative DB values
       req.auth = {
+        ...req.auth,
         id: user.id,
         utorid: user.utorid,
         role: role,
@@ -1859,7 +1857,7 @@ app.get("/transactions", requireClearance("manager"), async (req, res) => {
 // GET /transactions/:id
 app.get("/transactions/:transactionId",requireClearance("manager"),async (req, res) => {
     const id = Number(req.params.transactionId);
-    if (Number.isNaN(id) || !Number.isInteger(id) || id < 1) {
+    if (Number.isNaN(id)) {
       return res.status(400).json({ error: "invalid id" });
     }
 
@@ -1897,8 +1895,13 @@ app.get("/transactions/:transactionId",requireClearance("manager"),async (req, r
   }
 );
 
-// GET /users/me/transactions - MUST come before /users/:userId/transactions to avoid route conflict
-app.get("/users/me/transactions", requireClearance("regular"), async (req, res) => {
+// GET /users/:userId/transactions
+app.get("/users/:userId/transactions", requireClearance("manager"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (Number.isNaN(userId)) {
+    return res.status(400).json({ error: "invalid id" });
+  }
+
   const {
     type,
     relatedId,
@@ -1909,7 +1912,7 @@ app.get("/users/me/transactions", requireClearance("regular"), async (req, res) 
     limit = "10",
   } = req.query;
 
-  const where = { ownerId: req.auth.id };
+  const where = { ownerId: userId };
 
   if (typeof type === "string" && type.trim() !== "") {
     where.type = type.trim();
@@ -1979,13 +1982,8 @@ app.get("/users/me/transactions", requireClearance("regular"), async (req, res) 
   }
 });
 
-// GET /users/:userId/transactions - MUST come after /users/me/transactions
-app.get("/users/:userId/transactions", requireClearance("manager"), async (req, res) => {
-  const userId = Number(req.params.userId);
-  if (Number.isNaN(userId) || !Number.isInteger(userId) || userId < 1) {
-    return res.status(400).json({ error: "invalid id" });
-  }
-
+// GET /users/me/transactions
+app.get("/users/me/transactions", requireClearance("regular"), async (req, res) => {
   const {
     type,
     relatedId,
@@ -1996,7 +1994,7 @@ app.get("/users/:userId/transactions", requireClearance("manager"), async (req, 
     limit = "10",
   } = req.query;
 
-  const where = { ownerId: userId };
+  const where = { ownerId: req.auth.id };
 
   if (typeof type === "string" && type.trim() !== "") {
     where.type = type.trim();
