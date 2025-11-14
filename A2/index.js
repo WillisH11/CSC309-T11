@@ -111,14 +111,40 @@ function requireClearance(minRole) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
+    // Validate req.auth.id exists and is valid
+    if (!req.auth.id) {
+      console.error(`[AUTH] Missing user ID in token`);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    // Validate and normalize minRole
+    if (!minRole || typeof minRole !== "string") {
+      console.error(`[AUTH] Invalid minRole parameter: ${minRole}`);
+      return res.status(500).json({ error: "server error" });
+    }
+
+    const normalizedMinRole = String(minRole).toLowerCase();
+    if (!(normalizedMinRole in roleRank)) {
+      console.error(`[AUTH] Invalid minRole: ${normalizedMinRole}`);
+      return res.status(500).json({ error: "server error" });
+    }
+
     try {
+      // Convert id to number if it's a string (JWT tokens might have string IDs)
+      const userId = typeof req.auth.id === "string" ? parseInt(req.auth.id, 10) : req.auth.id;
+      
+      if (isNaN(userId) || !Number.isInteger(userId)) {
+        console.error(`[AUTH] Invalid user ID: ${req.auth.id}`);
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
       // fetch real user from DB
       const user = await prisma.user.findUnique({
-        where: { id: req.auth.id }
+        where: { id: userId }
       });
 
       if (!user) {
-        console.error(`[AUTH] User not found: id=${req.auth.id}`);
+        console.error(`[AUTH] User not found: id=${userId}`);
         return res.status(401).json({ error: "Unauthorized" });
       }
 
@@ -130,16 +156,15 @@ function requireClearance(minRole) {
       }
 
       const userRank = roleRank[role];
-      const minRank = roleRank[minRole];
+      const minRank = roleRank[normalizedMinRole];
 
       if (userRank < minRank) {
-        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${minRole} (rank=${minRank}) for ${req.method} ${req.path}`);
+        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${normalizedMinRole} (rank=${minRank}) for ${req.method} ${req.path}`);
         return res.status(403).json({ error: "Forbidden" });
       }
 
       // overwrite req.auth with authoritative DB values
       req.auth = {
-        ...req.auth,
         id: user.id,
         utorid: user.utorid,
         role: role,
