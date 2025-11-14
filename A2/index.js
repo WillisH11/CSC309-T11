@@ -73,16 +73,59 @@ const roleRank = {
   superuser: 4
 };
 
+// Helper function to safely get role rank
+function getRoleRank(role) {
+  if (!role || typeof role !== "string") return 0;
+  const normalizedRole = role.toLowerCase();
+  return roleRank[normalizedRole] || 0;
+}
+
+// Helper function to check if user has at least the required role
+function hasRole(req, minRole) {
+  if (!req.auth || !req.auth.role) return false;
+  const userRole = String(req.auth.role).toLowerCase();
+  const userRank = getRoleRank(userRole);
+  const minRank = getRoleRank(minRole);
+  return userRank >= minRank;
+}
+
 function requireClearance(minRole) {
-  return (req, res, next) => {
-    if (!req.auth)
+  return async (req, res, next) => {
+    if (!req.auth) {
       return res.status(401).json({ error: "Unauthorized" });
+    }
 
-    const role = String(req.auth.role || "").toLowerCase();
-    const rank = roleRank[role];
+    // fetch real user from DB
+    const user = await prisma.user.findUnique({
+      where: { id: req.auth.id }
+    });
 
-    if (typeof rank !== "number")
+    if (!user) {
       return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const role = String(user.role).toLowerCase();
+
+    if (!(role in roleRank)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    if (roleRank[role] < roleRank[minRole]) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // overwrite req.auth with authoritative DB values
+    req.auth = {
+      ...req.auth,
+      id: user.id,
+      utorid: user.utorid,
+      role: role,
+      email: user.email,
+      name: user.name,
+      verified: user.verified,
+      activated: user.activated,
+      suspicious: user.suspicious
+    };
 
     next();
   };
@@ -701,7 +744,7 @@ app.post("/promotions", requireClearance("manager"), async (req, res) => {
 });
 
 app.get("/promotions", async (req, res) => {
-  const isCashier = req.auth && roleRank[req.auth.role] >= roleRank["cashier"];
+  const isCashier = hasRole(req, "cashier");
   const now = new Date();
 
   let where = {};
@@ -753,8 +796,7 @@ app.get("/promotions/:id", async (req, res) => {
 
     if (!p) return res.status(404).json({ error: "not found" });
 
-    const isCashier =
-      req.auth && roleRank[req.auth.role] >= roleRank["cashier"];
+    const isCashier = hasRole(req, "cashier");
 
     if (!isCashier) {
       const now = new Date();
@@ -917,7 +959,7 @@ app.post("/transactions", async (req, res) => {
 
   // PURCHASE
   if (type === "purchase") {
-    if (roleRank[req.auth.role] < roleRank["cashier"]) {
+    if (!hasRole(req, "cashier")) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -1023,7 +1065,7 @@ app.post("/transactions", async (req, res) => {
 
   // ADJUSTMENT
   if (type === "adjustment") {
-    if (roleRank[req.auth.role] < roleRank["manager"]) {
+    if (!hasRole(req, "manager")) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -1776,8 +1818,7 @@ app.get("/events", async (req, res) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
 
-  const { role } = req.auth;
-  const isManager = roleRank[role] >= roleRank["manager"];
+  const isManager = hasRole(req, "manager");
 
   const {
     name,
@@ -1912,8 +1953,8 @@ app.get("/events/:eventId", async (req, res) => {
       return res.status(404).json({ error: "not found" });
     }
 
-    const { role, id: userId } = req.auth;
-    const isManager = roleRank[role] >= roleRank["manager"];
+    const { id: userId } = req.auth;
+    const isManager = hasRole(req, "manager");
     const isOrganizer = event.organizers.some((o) => o.userId === userId);
 
     // Regular user view (not manager and not organizer)
@@ -2123,8 +2164,12 @@ app.post("/events/:id/guests", async (req, res) => {
     return res.status(400).json({ error: "invalid payload" });
   }
 
-  const isManager = req.auth && roleRank[req.auth.role] >= roleRank["manager"];
-  const isOrg = req.auth && (await isOrganizer(eventId, req.auth.id));
+  if (!req.auth) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const isManager = hasRole(req, "manager");
+  const isOrg = await isOrganizer(eventId, req.auth.id);
 
   if (!isManager && !isOrg) {
     return res.status(403).json({ error: "Forbidden" });
@@ -2157,8 +2202,12 @@ app.delete("/events/:id/guests", async (req, res) => {
     return res.status(400).json({ error: "invalid payload" });
   }
 
-  const isManager = req.auth && roleRank[req.auth.role] >= roleRank["manager"];
-  const isOrg = req.auth && (await isOrganizer(eventId, req.auth.id));
+  if (!req.auth) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const isManager = hasRole(req, "manager");
+  const isOrg = await isOrganizer(eventId, req.auth.id);
 
   if (!isManager && !isOrg) {
     return res.status(403).json({ error: "Forbidden" });
@@ -2244,7 +2293,7 @@ app.post("/events/:id/transactions", async (req, res) => {
     return res.status(400).json({ error: "invalid payload" });
   }
 
-  const isManager = roleRank[req.auth.role] >= roleRank["manager"];
+  const isManager = hasRole(req, "manager");
   const isOrg = await isOrganizer(eventId, req.auth.id);
 
   if (!isManager && !isOrg) {
