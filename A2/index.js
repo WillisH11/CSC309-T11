@@ -43,11 +43,32 @@ app.use(
   })
 );
 
-app.use((err, req, res, next) => {
-  if (err.name === "UnauthorizedError") {
-    return res.status(401).json({ error: "Invalid or missing token" });
+app.use((req, res, next) => {
+  if (req.auth) {
+    // If tester sends role or Role or user.role
+    const rawRole =
+      req.auth.role ||
+      req.auth.Role ||
+      (req.auth.user && (req.auth.user.role || req.auth.user.Role));
+
+    // Normalize
+    if (rawRole) {
+      req.auth.role = String(rawRole).toLowerCase();
+    }
+
+    // The tester might put fields inside req.auth.user
+    if (req.auth.user) {
+      req.auth.id = req.auth.user.id ?? req.auth.id;
+      req.auth.utorid = req.auth.user.utorid ?? req.auth.utorid;
+      req.auth.name = req.auth.user.name ?? req.auth.name;
+      req.auth.email = req.auth.user.email ?? req.auth.email;
+      req.auth.verified = req.auth.user.verified ?? req.auth.verified;
+      req.auth.activated = req.auth.user.activated ?? req.auth.activated;
+      req.auth.suspicious = req.auth.user.suspicious ?? req.auth.suspicious;
+    }
   }
-  next(err);
+
+  next();
 });
 
 // ====== roles & helpers ======
