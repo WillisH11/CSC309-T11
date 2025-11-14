@@ -1859,7 +1859,7 @@ app.get("/transactions", requireClearance("manager"), async (req, res) => {
 // GET /transactions/:id
 app.get("/transactions/:transactionId",requireClearance("manager"),async (req, res) => {
     const id = Number(req.params.transactionId);
-    if (Number.isNaN(id)) {
+    if (Number.isNaN(id) || !Number.isInteger(id) || id < 1) {
       return res.status(400).json({ error: "invalid id" });
     }
 
@@ -1897,13 +1897,8 @@ app.get("/transactions/:transactionId",requireClearance("manager"),async (req, r
   }
 );
 
-// GET /users/:userId/transactions
-app.get("/users/:userId/transactions", requireClearance("manager"), async (req, res) => {
-  const userId = Number(req.params.userId);
-  if (Number.isNaN(userId)) {
-    return res.status(400).json({ error: "invalid id" });
-  }
-
+// GET /users/me/transactions - MUST come before /users/:userId/transactions to avoid route conflict
+app.get("/users/me/transactions", requireClearance("regular"), async (req, res) => {
   const {
     type,
     relatedId,
@@ -1914,7 +1909,7 @@ app.get("/users/:userId/transactions", requireClearance("manager"), async (req, 
     limit = "10",
   } = req.query;
 
-  const where = { ownerId: userId };
+  const where = { ownerId: req.auth.id };
 
   if (typeof type === "string" && type.trim() !== "") {
     where.type = type.trim();
@@ -1984,8 +1979,13 @@ app.get("/users/:userId/transactions", requireClearance("manager"), async (req, 
   }
 });
 
-// GET /users/me/transactions
-app.get("/users/me/transactions", requireClearance("regular"), async (req, res) => {
+// GET /users/:userId/transactions - MUST come after /users/me/transactions
+app.get("/users/:userId/transactions", requireClearance("manager"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (Number.isNaN(userId) || !Number.isInteger(userId) || userId < 1) {
+    return res.status(400).json({ error: "invalid id" });
+  }
+
   const {
     type,
     relatedId,
@@ -1996,7 +1996,7 @@ app.get("/users/me/transactions", requireClearance("regular"), async (req, res) 
     limit = "10",
   } = req.query;
 
-  const where = { ownerId: req.auth.id };
+  const where = { ownerId: userId };
 
   if (typeof type === "string" && type.trim() !== "") {
     where.type = type.trim();
