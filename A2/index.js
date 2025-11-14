@@ -42,38 +42,23 @@ app.use(
     algorithms: ["HS256"],
     credentialsRequired: false,
     getToken: req => {
-      if (
-        req.headers.authorization &&
-        req.headers.authorization.split(" ")[0] === "Bearer"
-      ) {
+      if (req.headers.authorization?.startsWith("Bearer "))
         return req.headers.authorization.split(" ")[1];
-      }
       return null;
     }
   })
 );
 
 app.use((req, res, next) => {
-  if (req.auth) {
-    const rawRole =
-      req.auth.role ||
-      req.auth.Role ||
-      (req.auth.user && (req.auth.user.role || req.auth.user.Role));
+  if (!req.auth) return next();
 
-    // Normalize
-    if (rawRole) {
-      req.auth.role = String(rawRole).toLowerCase();
-    }
+  
+  if (typeof req.auth.role === "string") {
+    req.auth.role = req.auth.role.toLowerCase();
+  }
 
-    if (req.auth.user) {
-      req.auth.id = req.auth.user.id ?? req.auth.id;
-      req.auth.utorid = req.auth.user.utorid ?? req.auth.utorid;
-      req.auth.name = req.auth.user.name ?? req.auth.name;
-      req.auth.email = req.auth.user.email ?? req.auth.email;
-      req.auth.verified = req.auth.user.verified ?? req.auth.verified;
-      req.auth.activated = req.auth.user.activated ?? req.auth.activated;
-      req.auth.suspicious = req.auth.user.suspicious ?? req.auth.suspicious;
-    }
+  if (!req.auth.id) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
 
   next();
@@ -93,12 +78,12 @@ function requireClearance(minRole) {
     if (!req.auth)
       return res.status(401).json({ error: "Unauthorized" });
 
-    const userRole = String(req.auth.role).toLowerCase();
+    const role = String(req.auth.role || "").toLowerCase();
 
-    if (!(userRole in roleRank))
+    if (!roleRank[role])
       return res.status(401).json({ error: "Unauthorized" });
 
-    if (roleRank[userRole] < roleRank[minRole])
+    if (roleRank[role] < roleRank[minRole])
       return res.status(403).json({ error: "Forbidden" });
 
     next();
