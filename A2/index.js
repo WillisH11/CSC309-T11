@@ -28,6 +28,7 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ====== auth middleware ======
 
@@ -39,13 +40,21 @@ app.use(
   jwt({
     secret: process.env.JWT_SECRET || "development-secret",
     algorithms: ["HS256"],
-    credentialsRequired: false
+    credentialsRequired: false,
+    getToken: req => {
+      if (
+        req.headers.authorization &&
+        req.headers.authorization.split(" ")[0] === "Bearer"
+      ) {
+        return req.headers.authorization.split(" ")[1];
+      }
+      return null;
+    }
   })
 );
 
 app.use((req, res, next) => {
   if (req.auth) {
-    // If tester sends role or Role or user.role
     const rawRole =
       req.auth.role ||
       req.auth.Role ||
@@ -56,7 +65,6 @@ app.use((req, res, next) => {
       req.auth.role = String(rawRole).toLowerCase();
     }
 
-    // The tester might put fields inside req.auth.user
     if (req.auth.user) {
       req.auth.id = req.auth.user.id ?? req.auth.id;
       req.auth.utorid = req.auth.user.utorid ?? req.auth.utorid;
@@ -150,7 +158,6 @@ app.post("/auth/tokens", async (req, res) => {
     const user = await prisma.user.findUnique({ where: { utorid } });
 
     if (!user || !user.password) {
-      // spec tester expects 401 for bad credentials
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
