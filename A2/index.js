@@ -69,25 +69,35 @@ app.use((err, req, res, next) => {
 app.use((req, res, next) => {
   if (!req.auth) return next();
 
-  // Read role from token FIRST
-  let tokenRole = req.auth.role;
+  let role = req.auth.role;
 
-  // Tester puts role inside req.auth.user sometimes
-  if (!tokenRole && req.auth.user?.role) {
-    tokenRole = req.auth.user.role;
+  if (role === undefined || role === null) {
+    if (req.auth.user?.role !== undefined && req.auth.user?.role !== null) {
+      role = req.auth.user.role;
+    }
   }
 
-  if (tokenRole) {
-    req.auth.role = String(tokenRole).toLowerCase();
+  if (role !== undefined && role !== null) {
+    req.auth.role = String(role).toLowerCase();
   }
 
-  // Extract id as well
-  if (!req.auth.id && req.auth.user?.id) {
-    req.auth.id = req.auth.user.id;
+  let id = req.auth.id;
+
+  if (id === undefined || id === null) {
+    if (req.auth.user?.id !== undefined && req.auth.user?.id !== null) {
+      id = req.auth.user.id;
+    }
+  }
+
+  if (id !== undefined && id !== null && !Number.isNaN(Number(id))) {
+    req.auth.id = Number(id);
   }
 
   next();
 });
+
+
+
 
 // ====== roles & helpers ======
 
@@ -130,77 +140,64 @@ async function hasRole(req, minRole) {
 
 function requireClearance(minRole) {
   return async (req, res, next) => {
+
     if (!req.auth) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Validate req.auth.id exists and is valid
-    if (!req.auth.id) {
-      console.error(`[AUTH] Missing user ID in token`);
+    // Normalize token role
+    const tokenRole = req.auth.role?.toLowerCase();
+
+    if (!tokenRole || !(tokenRole in roleRank)) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    try {
-      // Convert id to number if it's a string (JWT tokens might have string IDs)
-      const userId = typeof req.auth.id === "string" ? parseInt(req.auth.id, 10) : req.auth.id;
-      
-      if (isNaN(userId) || !Number.isInteger(userId) || userId < 1) {
-        console.error(`[AUTH] Invalid user ID: ${req.auth.id}`);
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+    // Normalize ID
+    const userId = Number(req.auth.id);
 
-      // fetch real user from DB
-      const user = await prisma.user.findUnique({
-        where: { id: userId }
-      });
+    if (Number.isNaN(userId)) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-      if (!user) {
-        console.error(`[AUTH] User not found: id=${userId}`);
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
 
-      const role = String(user.role).toLowerCase();
+    if (!user) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
 
-      if (!(role in roleRank)) {
-        console.error(`[AUTH] Invalid role: ${role} for user id=${user.id}`);
-        return res.status(401).json({ error: "Unauthorized" });
-      }
+    const userRank = roleRank[tokenRole];
 
-      const userRank = roleRank[role];
-      // Normalize minRole to lowercase before lookup
-      const normalizedMinRole = String(minRole).toLowerCase();
-      const minRank = roleRank[normalizedMinRole];
+    const requiredRole = String(minRole).toLowerCase();
+    const minRank = roleRank[requiredRole];
 
-      if (minRank === undefined) {
-        console.error(`[AUTH] Invalid minRole: ${minRole} (normalized: ${normalizedMinRole})`);
-        return res.status(500).json({ error: "server error" });
-      }
-
-      if (userRank < minRank) {
-        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${normalizedMinRole} (rank=${minRank}) for ${req.method} ${req.path}`);
-        return res.status(403).json({ error: "Forbidden" });
-      }
-
-      // overwrite req.auth with authoritative DB values
-      req.auth = {
-        ...req.auth,
-        id: user.id,
-        utorid: user.utorid,
-        role: role,
-        email: user.email,
-        name: user.name,
-        verified: user.verified,
-        activated: user.activated,
-        suspicious: user.suspicious
-      };
-
-      next();
-    } catch (e) {
-      console.error(`[AUTH] Error in requireClearance:`, e);
+    if (minRank === undefined) {
+      console.error(`INVALID minRole passed to requireClearance: ${minRole}`);
       return res.status(500).json({ error: "server error" });
     }
+
+    if (userRank < minRank) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    req.auth = {
+      ...req.auth,
+      id: user.id,
+      utorid: user.utorid,
+      email: user.email,
+      name: user.name,
+      verified: user.verified,
+      activated: user.activated,
+      suspicious: user.suspicious
+    };
+
+    next();
   };
 }
+
+
+
 
 
 const PASSWORD_REGEX =
