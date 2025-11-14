@@ -310,95 +310,65 @@ app.post("/users", requireClearance("cashier"), async (req, res) => {
 
 // GET /users (Manager or higher, with filters & pagination)
 app.get("/users", requireClearance("manager"), async (req, res) => {
-    try {
-        const {
-            name,
-            role,
-            verified,
-            activated,
-            page,
-            limit
-        } = req.query;
+  const { name, role, verified, activated, page = "1", limit = "10" } = req.query;
 
-        const where = {};
+  const where = {};
 
-        if (typeof name === "string" && name.trim() !== "") {
-            where.OR = [
-                { utorid: { contains: name, mode: "insensitive" } },
-                { name: { contains: name, mode: "insensitive" } }
-            ];
-        }
+  // name filter: utorid or name, substring match
+  if (typeof name === "string" && name.trim() !== "") {
+    where.OR = [
+      { utorid: { contains: name.trim() } },
+      { name: { contains: name.trim() } },
+    ];
+  }
 
-        if (role !== undefined) {
-            if (!["regular", "cashier", "manager", "superuser"].includes(role)) {
-                return res.status(400).json({ error: "invalid role filter" });
-            }
-            where.role = role;
-        }
+  if (typeof role === "string" && role.trim() !== "") {
+    where.role = role.trim();
+  }
 
-        if (verified !== undefined) {
-            if (verified !== "true" && verified !== "false") {
-                return res.status(400).json({ error: "invalid verified filter" });
-            }
-            where.verified = verified === "true";
-        }
+  if (typeof verified === "string") {
+    if (verified === "true") where.verified = true;
+    else if (verified === "false") where.verified = false;
+  }
 
-        if (activated !== undefined) {
-            if (activated !== "true" && activated !== "false") {
-                return res.status(400).json({ error: "invalid activated filter" });
-            }
-            where.activated = activated === "true";
-        }
+  if (typeof activated === "string") {
+    if (activated === "true") where.activated = true;
+    else if (activated === "false") where.activated = false;
+  }
 
-        let pageNum = 1;
-        let limitNum = 10;
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const limitNum = Math.max(Math.min(parseInt(limit, 10) || 10, 50), 1);
+  const skip = (pageNum - 1) * limitNum;
 
-        if (page !== undefined) {
-            pageNum = Number(page);
-            if (!Number.isInteger(pageNum) || pageNum < 1) {
-                return res.status(400).json({ error: "invalid page" });
-            }
-        }
+  try {
+    const [count, users] = await prisma.$transaction([
+      prisma.user.count({ where }),
+      prisma.user.findMany({
+        where,
+        skip,
+        take: limitNum,
+        orderBy: { id: "asc" },
+      }),
+    ]);
 
-        if (limit !== undefined) {
-            limitNum = Number(limit);
-            if (!Number.isInteger(limitNum) || limitNum < 1) {
-                return res.status(400).json({ error: "invalid limit" });
-            }
-        }
-
-        const skip = (pageNum - 1) * limitNum;
-
-        const [count, users] = await prisma.$transaction([
-            prisma.user.count({ where }),
-            prisma.user.findMany({
-                where,
-                orderBy: { id: "asc" },
-                skip,
-                take: limitNum
-            })
-        ]);
-
-        return res.json({
-            count,
-            results: users.map(u => ({
-                id: u.id,
-                utorid: u.utorid,
-                name: u.name,
-                email: u.email,
-                birthday: u.birthday,
-                role: u.role,
-                points: u.points,
-                createdAt: u.createdAt,
-                lastLogin: u.lastLogin,
-                verified: u.verified,
-                avatarUrl: u.avatarUrl
-            }))
-        });
-    } catch (e) {
-        console.error(e);
-        return res.status(500).json({ error: "server error" });
-    }
+    return res.json({
+      count,
+      results: users.map((u) => ({
+        id: u.id,
+        utorid: u.utorid,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        verified: u.verified,
+        activated: u.activated,
+        suspicious: u.suspicious,
+        lastLogin: u.lastLogin,
+      })),
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "server error" });
+  }
 });
 
 // helper: fetch available one-time promotions for a user
@@ -927,10 +897,7 @@ app.get("/promotions/:id", async (req, res) => {
   }
 });
 
-app.patch(
-  "/promotions/:id",
-  requireClearance("manager"),
-  async (req, res) => {
+app.patch("/promotions/:id",requireClearance("manager"),async (req, res) => {
     const promoId = Number(req.params.id);
     if (Number.isNaN(promoId)) {
       return res.status(400).json({ error: "invalid id" });
@@ -964,10 +931,7 @@ app.patch(
   }
 );
 
-app.delete(
-  "/promotions/:id",
-  requireClearance("manager"),
-  async (req, res) => {
+app.delete("/promotions/:id",requireClearance("manager"),async (req, res) => {
     const promoId = Number(req.params.id);
     if (Number.isNaN(promoId)) {
       return res.status(400).json({ error: "invalid id" });
@@ -1533,50 +1497,110 @@ function fullView(t) {
 }
 
 // GET /transactions
-app.get("/transactions", async (req, res) => {
-  if (!req.auth) return res.status(401).json({ error: "Unauthorized" });
+app.get("/transactions", requireClearance("manager"), async (req, res) => {
+  const {
+    name,
+    createdBy,
+    suspicious,
+    promotionId,
+    type,
+    relatedId,
+    amount,
+    operator,
+    page = "1",
+    limit = "10",
+  } = req.query;
 
-  const isCashier = roleRank[req.auth.role] >= roleRank["cashier"];
+  const where = {};
 
-  let statusFilter;
-  if (req.query.statuses) {
-    const statuses = req.query.statuses.split(",").map((s) => s.trim());
-    const mapped = statuses
-      .map((s) => {
-        if (s === "suspicious") return { suspicious: true };
-        if (s === "processed") return { processed: true };
-        if (s === "unprocessed") return { processed: false };
-        return null;
-      })
-      .filter(Boolean);
+  // Filter by user (owner) name or utorid
+  if (typeof name === "string" && name.trim() !== "") {
+    where.owner = {
+      OR: [
+        { utorid: { contains: name.trim() } },
+        { name: { contains: name.trim() } },
+      ],
+    };
+  }
 
-    if (mapped.length > 0) {
-      statusFilter = { OR: mapped };
+  // Filter by creator utorid
+  if (typeof createdBy === "string" && createdBy.trim() !== "") {
+    where.creator = {
+      utorid: createdBy.trim(),
+    };
+  }
+
+  if (typeof suspicious === "string") {
+    if (suspicious === "true") where.suspicious = true;
+    else if (suspicious === "false") where.suspicious = false;
+  }
+
+  if (promotionId !== undefined) {
+    const pid = Number(promotionId);
+    if (!Number.isNaN(pid)) {
+      where.transactionPromotions = {
+        some: { promotionId: pid },
+      };
     }
   }
 
-  const where = isCashier
-    ? statusFilter || {}
-    : {
-        ownerId: req.auth.id,
-        ...(statusFilter || {})
-      };
+  if (typeof type === "string" && type.trim() !== "") {
+    where.type = type.trim();
+  }
+
+  if (relatedId !== undefined) {
+    const rid = Number(relatedId);
+    if (!Number.isNaN(rid)) {
+      where.relatedId = rid;
+    }
+  }
+
+  if (amount !== undefined) {
+    const amt = Number(amount);
+    if (!Number.isNaN(amt) && typeof operator === "string") {
+      if (operator === "gte") {
+        where.amount = { gte: amt };
+      } else if (operator === "lte") {
+        where.amount = { lte: amt };
+      }
+    }
+  }
+
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const limitNum = Math.max(Math.min(parseInt(limit, 10) || 10, 50), 1);
+  const skip = (pageNum - 1) * limitNum;
 
   try {
-    const list = await prisma.transaction.findMany({
-      where,
-      include: {
-        owner: true,
-        creator: true
-      },
-      orderBy: { id: "desc" }
-    });
+    const [count, txs] = await prisma.$transaction([
+      prisma.transaction.count({ where }),
+      prisma.transaction.findMany({
+        where,
+        skip,
+        take: limitNum,
+        orderBy: { id: "asc" },
+        include: {
+          owner: true,
+          creator: true,
+          transactionPromotions: true,
+        },
+      }),
+    ]);
 
-    if (!isCashier) {
-      return res.json(list.map(ownerView));
-    }
+    const results = txs.map((t) => ({
+      id: t.id,
+      utorid: t.owner?.utorid,
+      amount: t.amount,
+      type: t.type,
+      spent: t.spent ?? undefined,
+      relatedId: t.relatedId ?? undefined,
+      promotionIds: t.transactionPromotions?.map((p) => p.promotionId) || [],
+      suspicious: t.suspicious ?? false,
+      redeemed: t.redeemed ?? undefined,
+      remark: t.remark || "",
+      createdBy: t.creator?.utorid,
+    }));
 
-    return res.json(list.map(fullView));
+    return res.json({ count, results });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
@@ -1584,36 +1608,45 @@ app.get("/transactions", async (req, res) => {
 });
 
 // GET /transactions/:id
-app.get("/transactions/:transactionId", async (req, res) => {
-  if (!req.auth) return res.status(401).json({ error: "Unauthorized" });
-
-  const id = Number(req.params.transactionId);
-  if (Number.isNaN(id)) {
-    return res.status(400).json({ error: "invalid id" });
-  }
-
-  try {
-    const t = await prisma.transaction.findUnique({
-      where: { id },
-      include: {
-        owner: true,
-        creator: true
-      }
-    });
-
-    if (!t) return res.status(404).json({ error: "not found" });
-
-    const isCashier = roleRank[req.auth.role] >= roleRank["cashier"];
-    if (!isCashier && t.ownerId !== req.auth.id) {
-      return res.status(403).json({ error: "Forbidden" });
+app.get("/transactions/:transactionId",requireClearance("manager"),async (req, res) => {
+    const id = Number(req.params.transactionId);
+    if (Number.isNaN(id)) {
+      return res.status(400).json({ error: "invalid id" });
     }
 
-    return res.json(isCashier ? fullView(t) : ownerView(t));
-  } catch (e) {
-    console.error(e);
-    return res.status(500).json({ error: "server error" });
+    try {
+      const t = await prisma.transaction.findUnique({
+        where: { id },
+        include: {
+          owner: true,
+          creator: true,
+          transactionPromotions: true,
+        },
+      });
+
+      if (!t) {
+        return res.status(404).json({ error: "not found" });
+      }
+
+      return res.json({
+        id: t.id,
+        utorid: t.owner?.utorid,
+        type: t.type,
+        spent: t.spent ?? undefined,
+        amount: t.amount,
+        relatedId: t.relatedId ?? undefined,
+        promotionIds: t.transactionPromotions?.map((p) => p.promotionId) || [],
+        suspicious: t.suspicious ?? false,
+        redeemed: t.redeemed ?? undefined,
+        remark: t.remark || "",
+        createdBy: t.creator?.utorid,
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ error: "server error" });
+    }
   }
-});
+);
 
 // ===============
 // EVENTS helpers
@@ -1683,51 +1716,157 @@ app.post("/events", requireClearance("manager"), async (req, res) => {
 });
 
 app.get("/events", async (req, res) => {
-  const isManager = req.auth && roleRank[req.auth.role] >= roleRank["manager"];
+  if (!req.auth) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
 
-  const where = isManager ? {} : { published: true };
+  const { role } = req.auth;
+  const isManager = roleRank[role] >= roleRank["manager"];
+
+  const {
+    name,
+    location,
+    started,
+    ended,
+    showFull,
+    page = "1",
+    limit = "10",
+    published, // manager-only filter
+  } = req.query;
+
+  // You can't specify both started and ended at the same time
+  if (typeof started !== "undefined" && typeof ended !== "undefined") {
+    return res.status(400).json({ error: "cannot filter by both started and ended" });
+  }
+
+  const where = {};
+
+  // Managers can see everything, but can filter by published.
+  // Regular users can only see published events.
+  if (isManager) {
+    if (typeof published === "string") {
+      if (published === "true") where.published = true;
+      else if (published === "false") where.published = false;
+    }
+  } else {
+    where.published = true;
+  }
+
+  if (typeof name === "string" && name.trim() !== "") {
+    where.name = { contains: name.trim() };
+  }
+
+  if (typeof location === "string" && location.trim() !== "") {
+    where.location = { contains: location.trim() };
+  }
+
+  const now = new Date();
+
+  if (typeof started === "string") {
+    const flag = started === "true";
+    where.startTime = flag ? { lte: now } : { gt: now };
+  }
+
+  if (typeof ended === "string") {
+    const flag = ended === "true";
+    where.endTime = flag ? { lte: now } : { gt: now };
+  }
+
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const limitNum = Math.max(Math.min(parseInt(limit, 10) || 10, 50), 1);
 
   try {
-    const events = await prisma.event.findMany({
+    // We need to compute "full" events by counting guests, so we fetch first then filter in JS.
+    const allEvents = await prisma.event.findMany({
       where,
-      orderBy: { startTime: "asc" }
+      include: { guests: true },
+      orderBy: { startTime: "asc" },
     });
 
-    if (!isManager) {
-      const trimmed = events.map((e) => ({
+    const showFullFlag = showFull === "true";
+
+    const filtered = allEvents.filter((e) => {
+      const isFull =
+        e.capacity !== null &&
+        typeof e.capacity === "number" &&
+        e.capacity > 0 &&
+        e.guests.length >= e.capacity;
+
+      if (!showFullFlag && isFull) {
+        return false;
+      }
+      return true;
+    });
+
+    const count = filtered.length;
+    const startIndex = (pageNum - 1) * limitNum;
+    const sliced = filtered.slice(startIndex, startIndex + limitNum);
+
+    const results = sliced.map((e) => {
+      const base = {
         id: e.id,
         name: e.name,
-        description: e.description,
         location: e.location,
         startTime: e.startTime,
         endTime: e.endTime,
-        published: e.published
-      }));
-      return res.json(trimmed);
-    }
+        capacity: e.capacity,
+        numGuests: e.guests.length,
+      };
 
-    return res.json(events);
+      if (!isManager) {
+        // regular view — no points info
+        return base;
+      }
+
+      return {
+        ...base,
+        pointsRemain: e.pointsRemain,
+        pointsAwarded: e.pointsAwarded,
+        published: e.published,
+      };
+    });
+
+    return res.json({ count, results });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
   }
 });
 
-app.get("/events/:id", async (req, res) => {
-  const eventId = Number(req.params.id);
+app.get("/events/:eventId", async (req, res) => {
+  if (!req.auth) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const eventId = Number(req.params.eventId);
   if (Number.isNaN(eventId)) {
     return res.status(400).json({ error: "invalid id" });
   }
 
   try {
-    const event = await loadEvent(eventId);
-    if (!event) return res.status(404).json({ error: "not found" });
+    const event = await prisma.event.findUnique({
+      where: { id: eventId },
+      include: {
+        organizers: { include: { user: true } },
+        guests: { include: { user: true } },
+      },
+    });
 
-    const isManager =
-      req.auth && roleRank[req.auth.role] >= roleRank["manager"];
-    const isOrg = req.auth && (await isOrganizer(eventId, req.auth.id));
+    if (!event) {
+      return res.status(404).json({ error: "not found" });
+    }
 
-    if (!isManager && !isOrg) {
+    const { role, id: userId } = req.auth;
+    const isManager = roleRank[role] >= roleRank["manager"];
+    const isOrganizer = event.organizers.some((o) => o.userId === userId);
+
+    // Regular user view (not manager and not organizer)
+    if (!isManager && !isOrganizer) {
+      if (!event.published) {
+        // unpublished events are invisible to regular users
+        return res.status(404).json({ error: "not found" });
+      }
+
       return res.json({
         id: event.id,
         name: event.name,
@@ -1735,11 +1874,46 @@ app.get("/events/:id", async (req, res) => {
         location: event.location,
         startTime: event.startTime,
         endTime: event.endTime,
-        published: event.published
+        capacity: event.capacity,
+        organizers: event.organizers.map((o) => ({
+          id: o.user.id,
+          utorid: o.user.utorid,
+          name: o.user.name,
+        })),
+        guests: event.guests.map((g) => ({
+          id: g.user.id,
+          utorid: g.user.utorid,
+          name: g.user.name,
+        })),
+        pointsRemain: null,
+        pointsAwarded: null,
+        published: event.published,
       });
     }
 
-    return res.json(event);
+    // Manager/organizer full view
+    return res.json({
+      id: event.id,
+      name: event.name,
+      description: event.description,
+      location: event.location,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      capacity: event.capacity,
+      pointsRemain: event.pointsRemain,
+      pointsAwarded: event.pointsAwarded,
+      published: event.published,
+      organizers: event.organizers.map((o) => ({
+        id: o.user.id,
+        utorid: o.user.utorid,
+        name: o.user.name,
+      })),
+      guests: event.guests.map((g) => ({
+        id: g.user.id,
+        utorid: g.user.utorid,
+        name: g.user.name,
+      })),
+    });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server error" });
