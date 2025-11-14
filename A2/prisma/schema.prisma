@@ -84,7 +84,7 @@ model Transaction {
 
   createdAt DateTime @default(now())
 
-  promotionLinks TransactionPromotion[] @relation("TransactionToPromotion")
+  transactionPromotions TransactionPromotion[] @relation("TransactionToPromotion")
 }
 
 
