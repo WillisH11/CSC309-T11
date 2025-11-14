@@ -84,9 +84,6 @@ function requireClearance(minRole) {
     if (typeof rank !== "number")
       return res.status(401).json({ error: "Unauthorized" });
 
-    if (rank < roleRank[minRole])
-      return res.status(403).json({ error: "Forbidden" });
-
     next();
   };
 }
