@@ -36,6 +36,7 @@ if (!process.env.JWT_SECRET) {
   console.error("JWT_SECRET not set");
 }
 
+// JWT middleware - handle expired/invalid tokens gracefully
 app.use(
   jwt({
     secret: process.env.JWT_SECRET || "development-secret",
@@ -48,6 +49,19 @@ app.use(
     }
   })
 );
+
+// Error handler for JWT errors (expired tokens, etc.)
+// This MUST be placed after the JWT middleware but before routes
+app.use((err, req, res, next) => {
+  if (err && err.name === "UnauthorizedError") {
+    // JWT token is missing, invalid, or expired
+    // Since credentialsRequired is false, we just continue without auth
+    req.auth = undefined;
+    return next();
+  }
+  // Other errors should be passed through
+  return next(err);
+});
 
 app.use((req, res, next) => {
   // Only process if auth token was provided
@@ -76,7 +90,7 @@ const roleRank = {
 // Helper function to safely get role rank
 function getRoleRank(role) {
   if (!role || typeof role !== "string") return 0;
-  const normalizedRole = role.toLowerCase();
+  const normalizedRole = String(role).toLowerCase();
   return roleRank[normalizedRole] || 0;
 }
 
@@ -109,39 +123,50 @@ function requireClearance(minRole) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // fetch real user from DB
-    const user = await prisma.user.findUnique({
-      where: { id: req.auth.id }
-    });
+    try {
+      // fetch real user from DB
+      const user = await prisma.user.findUnique({
+        where: { id: req.auth.id }
+      });
 
-    if (!user) {
-      return res.status(401).json({ error: "Unauthorized" });
+      if (!user) {
+        console.error(`[AUTH] User not found: id=${req.auth.id}`);
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const role = String(user.role).toLowerCase();
+
+      if (!(role in roleRank)) {
+        console.error(`[AUTH] Invalid role: ${role} for user id=${user.id}`);
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      const userRank = roleRank[role];
+      const minRank = roleRank[minRole];
+
+      if (userRank < minRank) {
+        console.error(`[AUTH] Insufficient clearance: user role=${role} (rank=${userRank}) < required=${minRole} (rank=${minRank}) for ${req.method} ${req.path}`);
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // overwrite req.auth with authoritative DB values
+      req.auth = {
+        ...req.auth,
+        id: user.id,
+        utorid: user.utorid,
+        role: role,
+        email: user.email,
+        name: user.name,
+        verified: user.verified,
+        activated: user.activated,
+        suspicious: user.suspicious
+      };
+
+      next();
+    } catch (e) {
+      console.error(`[AUTH] Error in requireClearance:`, e);
+      return res.status(500).json({ error: "server error" });
     }
-
-    const role = String(user.role).toLowerCase();
-
-    if (!(role in roleRank)) {
-      return res.status(401).json({ error: "Unauthorized" });
-    }
-
-    if (roleRank[role] < roleRank[minRole]) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
-    // overwrite req.auth with authoritative DB values
-    req.auth = {
-      ...req.auth,
-      id: user.id,
-      utorid: user.utorid,
-      role: role,
-      email: user.email,
-      name: user.name,
-      verified: user.verified,
-      activated: user.activated,
-      suspicious: user.suspicious
-    };
-
-    next();
   };
 }
 
@@ -438,37 +463,55 @@ app.get("/users", requireClearance("manager"), async (req, res) => {
 
   const pageNum = Number(page);
   const limitNum = Number(limit);
-  if (!Number.isInteger(pageNum) || pageNum < 1)
+  if (isNaN(pageNum) || pageNum < 1 || !Number.isInteger(pageNum))
     return res.status(400).json({ error: "invalid page" });
-  if (!Number.isInteger(limitNum) || limitNum < 1)
+  if (isNaN(limitNum) || limitNum < 1 || !Number.isInteger(limitNum))
     return res.status(400).json({ error: "invalid limit" });
 
   const skip = (pageNum - 1) * limitNum;
-  const where = {};
+  
+  // Build where clause - combine OR (name filter) with AND (other filters)
+  const whereConditions = [];
 
   // Build name filter (matches BOTH name + utorid with OR)
   if (typeof name === "string" && name.trim() !== "") {
-    where.OR = [
-      { name: { contains: name.trim(), mode: "insensitive" } },
-      { utorid: { contains: name.trim(), mode: "insensitive" } }
-    ];
+    const nameLower = name.trim().toLowerCase();
+    whereConditions.push({
+      OR: [
+        { name: { contains: name.trim() } },
+        { utorid: { contains: name.trim() } }
+      ]
+    });
   }
 
   // Role filter - Prisma enums work with string values
-  if (role) {
+  if (role !== undefined && role !== "") {
     const r = String(role).toLowerCase();
     if (!["regular", "cashier", "manager", "superuser"].includes(r))
       return res.status(400).json({ error: "invalid role" });
-    where.role = r;
+    whereConditions.push({ role: r });
   }
 
-  if (activated === "true") where.activated = true;
-  else if (activated === "false") where.activated = false;
-  else if (activated !== undefined && activated !== "") return res.status(400).json({ error: "invalid activated" });
+  // Activated filter
+  if (activated === "true") {
+    whereConditions.push({ activated: true });
+  } else if (activated === "false") {
+    whereConditions.push({ activated: false });
+  } else if (activated !== undefined && activated !== "") {
+    return res.status(400).json({ error: "invalid activated" });
+  }
 
-  if (verified === "true") where.verified = true;
-  else if (verified === "false") where.verified = false;
-  else if (verified !== undefined && verified !== "") return res.status(400).json({ error: "invalid verified" });
+  // Verified filter
+  if (verified === "true") {
+    whereConditions.push({ verified: true });
+  } else if (verified === "false") {
+    whereConditions.push({ verified: false });
+  } else if (verified !== undefined && verified !== "") {
+    return res.status(400).json({ error: "invalid verified" });
+  }
+
+  // Combine all conditions with AND
+  const where = whereConditions.length > 0 ? { AND: whereConditions } : {};
 
   try {
     const [count, users] = await Promise.all([
@@ -628,8 +671,12 @@ app.get("/users/:id", requireClearance("cashier"), async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "not found" });
 
-    // FIX: Cashiers get limited view, managers+ get full view
-    if (req.auth.role === "cashier")
+    // Check if user has manager+ role (from DB via requireClearance)
+    const userRole = req.auth.role;
+    const isManager = getRoleRank(userRole) >= getRoleRank("manager");
+    
+    // Cashiers get limited view, managers+ get full view
+    if (!isManager)
       return res.json(cashierUser(user));
 
     return res.json(fullUser(user));
@@ -681,7 +728,8 @@ app.patch("/users/:id", requireClearance("manager"), async (req, res) => {
       return res.status(400).json({ error: "invalid role" });
 
     // Manager cannot promote to manager or superuser (only regular or cashier)
-    if (req.auth.role === "manager" && (r === "manager" || r === "superuser"))
+    const userRole = req.auth.role;
+    if (userRole === "manager" && (r === "manager" || r === "superuser"))
       return res.status(403).json({ error: "forbidden role change" });
     
     // Normalize role for database update
@@ -696,6 +744,23 @@ app.patch("/users/:id", requireClearance("manager"), async (req, res) => {
   try {
     const exists = await prisma.user.findUnique({ where: { id } });
     if (!exists) return res.status(404).json({ error: "not found" });
+
+    // When promoting to cashier, suspicious must be false
+    if ("role" in updates && updates.role === "cashier") {
+      if (exists.suspicious) {
+        return res.status(400).json({ error: "suspicious user cannot be cashier" });
+      }
+      // Ensure suspicious is false when promoting to cashier
+      updates.suspicious = false;
+    }
+
+    // When setting suspicious to true, user cannot be cashier
+    if ("suspicious" in updates && updates.suspicious === true) {
+      const finalRole = "role" in updates ? updates.role : exists.role;
+      if (finalRole === "cashier") {
+        return res.status(400).json({ error: "cashier cannot be suspicious" });
+      }
+    }
 
     const updated = await prisma.user.update({
       where: { id },
