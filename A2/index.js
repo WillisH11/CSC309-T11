@@ -339,10 +339,8 @@ function fullUser(u) {
     createdAt: u.createdAt,
     lastLogin: u.lastLogin,
     verified: u.verified,
-    activated: u.activated,
-    suspicious: u.suspicious,
     avatarUrl: u.avatarUrl,
-    promotions: formatPromotions(u.promotionUses)
+    promotions: formatPromotions(u.promotionUses || [])
   };
 }
 
@@ -354,14 +352,14 @@ function cashierUser(u) {
     name: u.name,
     points: u.points,
     verified: u.verified,
-    promotions: formatPromotions(u.promotionUses)
+    promotions: formatPromotions(u.promotionUses || [])
   };
 }
 
 
 
 // =======================================================
-// POST /users  — create regular user (cashier+)
+// POST /users  – create regular user (cashier+)
 // =======================================================
 app.post("/users", requireClearance("cashier"), async (req, res) => {
   const { utorid, name, email } = req.body || {};
@@ -413,10 +411,10 @@ app.post("/users", requireClearance("cashier"), async (req, res) => {
 
 
 // =======================================================
-// GET /users  — list users (manager+)
+// GET /users  – list users (manager+)
 // =======================================================
 app.get("/users", requireClearance("manager"), async (req, res) => {
-  const { name, utorid, role, activated, verified, suspicious, page = "1", limit = "10" } = req.query;
+  const { name, role, activated, verified, page = "1", limit = "10" } = req.query;
 
   const pageNum = Number(page);
   const limitNum = Number(limit);
@@ -428,16 +426,12 @@ app.get("/users", requireClearance("manager"), async (req, res) => {
   const skip = (pageNum - 1) * limitNum;
   const where = {};
 
-  // name filter matches BOTH name + utorid
+  // FIX: name filter matches BOTH name + utorid with OR
   if (typeof name === "string" && name.trim() !== "") {
     where.OR = [
       { name: { contains: name, mode: "insensitive" } },
       { utorid: { contains: name, mode: "insensitive" } }
     ];
-  }
-
-  if (typeof utorid === "string" && utorid.trim() !== "") {
-    where.utorid = { contains: utorid, mode: "insensitive" };
   }
 
   if (role) {
@@ -454,10 +448,6 @@ app.get("/users", requireClearance("manager"), async (req, res) => {
   if (verified === "true") where.verified = true;
   else if (verified === "false") where.verified = false;
   else if (verified !== undefined) return res.status(400).json({ error: "invalid verified" });
-
-  if (suspicious === "true") where.suspicious = true;
-  else if (suspicious === "false") where.suspicious = false;
-  else if (suspicious !== undefined) return res.status(400).json({ error: "invalid suspicious" });
 
   try {
     const [count, users] = await Promise.all([
@@ -530,6 +520,19 @@ app.patch("/users/me", requireClearance("regular"), async (req, res) => {
   if (Object.keys(updates).length === 0)
     return res.status(400).json({ error: "empty payload" });
 
+  // FIX: Validate email and birthday if provided
+  if (updates.email && !isValidEmail(updates.email)) {
+    return res.status(400).json({ error: "invalid email" });
+  }
+
+  if (updates.birthday && !isValidBirthdayString(updates.birthday)) {
+    return res.status(400).json({ error: "invalid birthday" });
+  }
+
+  if (updates.name && !isValidName(updates.name)) {
+    return res.status(400).json({ error: "invalid name" });
+  }
+
   try {
     const user = await prisma.user.update({
       where: { id: req.auth.id },
@@ -544,6 +547,48 @@ app.patch("/users/me", requireClearance("regular"), async (req, res) => {
   }
 });
 
+
+// =======================================================
+// PATCH /users/me/password (regular+)
+// =======================================================
+app.patch("/users/me/password", requireClearance("regular"), async (req, res) => {
+  const { old, new: newPassword } = req.body || {};
+
+  if (!old || !newPassword) {
+    return res.status(400).json({ error: "old and new password required" });
+  }
+
+  if (!isStrongPassword(newPassword)) {
+    return res.status(400).json({ error: "weak password" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.auth.id }
+    });
+
+    if (!user || !user.password) {
+      return res.status(404).json({ error: "user not found" });
+    }
+
+    const ok = await bcrypt.compare(old, user.password);
+    if (!ok) {
+      return res.status(403).json({ error: "incorrect current password" });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+
+    await prisma.user.update({
+      where: { id: req.auth.id },
+      data: { password: hashed }
+    });
+
+    return res.json({ status: "ok" });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "server error" });
+  }
+});
 
 
 // =======================================================
@@ -562,7 +607,8 @@ app.get("/users/:id", requireClearance("cashier"), async (req, res) => {
 
     if (!user) return res.status(404).json({ error: "not found" });
 
-    if (req.auth.role === "cashier" || req.auth.role === "regular")
+    // FIX: Cashiers get limited view, managers+ get full view
+    if (req.auth.role === "cashier")
       return res.json(cashierUser(user));
 
     return res.json(fullUser(user));
@@ -591,11 +637,21 @@ app.patch("/users/:id", requireClearance("manager"), async (req, res) => {
     updates[key] = req.body[key];
   }
 
+  // FIX: Check for empty payload
+  if (Object.keys(updates).length === 0) {
+    return res.status(400).json({ error: "empty payload" });
+  }
+
   if (
     ("verified" in updates && typeof updates.verified !== "boolean") ||
     ("suspicious" in updates && typeof updates.suspicious !== "boolean")
   ) {
     return res.status(400).json({ error: "must be boolean" });
+  }
+
+  // FIX: Validate email if provided
+  if (updates.email && !isValidEmail(updates.email)) {
+    return res.status(400).json({ error: "invalid email" });
   }
 
   if ("role" in updates) {
@@ -1515,6 +1571,175 @@ app.get("/transactions/:transactionId",requireClearance("manager"),async (req, r
     }
   }
 );
+
+// GET /users/:userId/transactions
+app.get("/users/:userId/transactions", requireClearance("manager"), async (req, res) => {
+  const userId = Number(req.params.userId);
+  if (Number.isNaN(userId)) {
+    return res.status(400).json({ error: "invalid id" });
+  }
+
+  const {
+    type,
+    relatedId,
+    promotionId,
+    amount,
+    operator,
+    page = "1",
+    limit = "10",
+  } = req.query;
+
+  const where = { ownerId: userId };
+
+  if (typeof type === "string" && type.trim() !== "") {
+    where.type = type.trim();
+  }
+
+  if (relatedId !== undefined) {
+    const rid = Number(relatedId);
+    if (!Number.isNaN(rid)) {
+      where.relatedId = rid;
+    }
+  }
+
+  if (promotionId !== undefined) {
+    const pid = Number(promotionId);
+    if (!Number.isNaN(pid)) {
+      where.transactionPromotions = {
+        some: { promotionId: pid },
+      };
+    }
+  }
+
+  if (amount !== undefined) {
+    const amt = Number(amount);
+    if (!Number.isNaN(amt) && typeof operator === "string") {
+      if (operator === "gte") {
+        where.amount = { gte: amt };
+      } else if (operator === "lte") {
+        where.amount = { lte: amt };
+      }
+    }
+  }
+
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const limitNum = Math.max(Math.min(parseInt(limit, 10) || 10, 50), 1);
+  const skip = (pageNum - 1) * limitNum;
+
+  try {
+    const [count, txs] = await prisma.$transaction([
+      prisma.transaction.count({ where }),
+      prisma.transaction.findMany({
+        where,
+        skip,
+        take: limitNum,
+        orderBy: { id: "asc" },
+        include: {
+          creator: true,
+          transactionPromotions: true,
+        },
+      }),
+    ]);
+
+    const results = txs.map((t) => ({
+      id: t.id,
+      type: t.type,
+      spent: t.spent ?? undefined,
+      amount: t.amount,
+      relatedId: t.relatedId ?? undefined,
+      promotionIds: t.transactionPromotions?.map((p) => p.promotionId) || [],
+      remark: t.remark || "",
+      createdBy: t.creator?.utorid,
+    }));
+
+    return res.json({ count, results });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "server error" });
+  }
+});
+
+// GET /users/me/transactions
+app.get("/users/me/transactions", requireClearance("regular"), async (req, res) => {
+  const {
+    type,
+    relatedId,
+    promotionId,
+    amount,
+    operator,
+    page = "1",
+    limit = "10",
+  } = req.query;
+
+  const where = { ownerId: req.auth.id };
+
+  if (typeof type === "string" && type.trim() !== "") {
+    where.type = type.trim();
+  }
+
+  if (relatedId !== undefined) {
+    const rid = Number(relatedId);
+    if (!Number.isNaN(rid)) {
+      where.relatedId = rid;
+    }
+  }
+
+  if (promotionId !== undefined) {
+    const pid = Number(promotionId);
+    if (!Number.isNaN(pid)) {
+      where.transactionPromotions = {
+        some: { promotionId: pid },
+      };
+    }
+  }
+
+  if (amount !== undefined) {
+    const amt = Number(amount);
+    if (!Number.isNaN(amt) && typeof operator === "string") {
+      if (operator === "gte") {
+        where.amount = { gte: amt };
+      } else if (operator === "lte") {
+        where.amount = { lte: amt };
+      }
+    }
+  }
+
+  const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+  const limitNum = Math.max(Math.min(parseInt(limit, 10) || 10, 50), 1);
+  const skip = (pageNum - 1) * limitNum;
+
+  try {
+    const [count, txs] = await prisma.$transaction([
+      prisma.transaction.count({ where }),
+      prisma.transaction.findMany({
+        where,
+        skip,
+        take: limitNum,
+        orderBy: { id: "asc" },
+        include: {
+          creator: true,
+          transactionPromotions: true,
+        },
+      }),
+    ]);
+
+    const results = txs.map((t) => ({
+      id: t.id,
+      type: t.type,
+      spent: t.spent ?? undefined,
+      amount: t.amount,
+      relatedId: t.relatedId ?? undefined,
+      promotionIds: t.transactionPromotions?.map((p) => p.promotionId) || [],
+      remark: t.remark || "",
+      createdBy: t.creator?.utorid,
+    }));
+
+    return res.json({ count, results });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "server error" });
+  }
+});
 
 // ===============
 // EVENTS helpers
