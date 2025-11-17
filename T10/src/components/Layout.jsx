@@ -1,4 +1,5 @@
 import './Layout.css';
+import { Link, Outlet } from "react-router-dom";
 
 const Layout = ({ children }) => {
     const get_academic_term = () => {
@@ -20,10 +21,10 @@ const Layout = ({ children }) => {
 
     return <>
         <header>
-            <a href="/" className="link">CSC309: Tutorial 10</a>
+            <Link to="/" className="link">CSC309: Tutorial 10</Link>
         </header>
         <main>
-            {children}
+            <Outlet />
         </main>
         <footer>
             &copy; CSC309, {get_academic_term()}, University of Toronto.

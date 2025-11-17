@@ -1,30 +1,29 @@
-import './App.css';
-import { useState } from 'react';
-import { CitiesProvider } from './contexts/CitiesContext';
-import Layout from './components/Layout';
-import Home from './pages/Home';
-import NotFound from './pages/NotFound';
-import Detail from './pages/Detail';
+import "./App.css";
+import { CitiesProvider } from "./contexts/CitiesContext";
+import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Layout from "./components/Layout";
+import Home from "./pages/Home";
+import Detail from "./pages/Detail";
+import NotFound from "./pages/NotFound";
 
 const App = () => {
-    const [page, setPage] = useState("home");
-    let component;
+    return (
+        <CitiesProvider>
+            <BrowserRouter>
+                <Routes>
+                    <Route path="/" element={<Layout />}>
+                        {/* Home page */}
+                        <Route index element={<Home />} />
 
-    if (page === "home") {
-        component = <Home setPage={setPage} />;
-    }
-    else if (typeof(page) === "number") {
-        component = <Detail cityId={page} setPage={setPage} />;
-    }
-    else {
-        component = <NotFound />;
-    }
+                        {/* City page */}
+                        <Route path=":cityId" element={<Detail />} />
 
-    return <CitiesProvider>
-        <Layout>
-            {component}
-        </Layout>
-    </CitiesProvider>;
+                        <Route path="*" element={<NotFound />} />
+                    </Route>
+                </Routes>
+            </BrowserRouter>
+        </CitiesProvider>
+    );
 };
 
 export default App;

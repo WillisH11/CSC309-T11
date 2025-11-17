@@ -1,18 +1,56 @@
-import './AddCity.css';
+import "./AddCity.css";
 import { forwardRef, useState } from "react";
+import { useCities } from "../contexts/CitiesContext";
 
 const AddCity = forwardRef(({ setError }, ref) => {
     const [cityName, setCityName] = useState("");
+    const { addCity } = useCities();
 
-    const handle_submit = (e) => {
-        e.preventDefault(); 
+    const handle_submit = async (e) => {
+        e.preventDefault();
 
-        setError("TODO: complete me");    
-        // HINT: fetch the coordinates of the city from Nominatim,
-        //       then add it to CitiesContext's list of cities.
-        
-        setCityName("");
-        ref.current?.close();
+        const trimmed = cityName.trim();
+
+        if (trimmed === "") {
+            setError("City name cannot be blank.");
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${trimmed}&limit=1`,
+                {
+                    headers: {
+                        "User-Agent": "ACoolWeatherApp/0.1 (your_email)"
+                    }
+                }
+            );
+
+            const data = await response.json();
+
+            if (!data || data.length === 0) {
+                setError(`City '${trimmed}' is not found.`);
+                return;
+            }
+
+            const result = data[0];
+            const latitude = parseFloat(result.lat);
+            const longitude = parseFloat(result.lon);
+            
+            addCity({
+                name: trimmed,
+                latitude,
+                longitude
+            });
+
+            setCityName("");
+            setError("");
+            ref.current?.close();
+
+        } catch (err) {
+            console.error("Nominatim error:", err);
+            setError("Failed to fetch city data. Try again later.");
+        }
     };
 
     return (
@@ -30,7 +68,7 @@ const AddCity = forwardRef(({ setError }, ref) => {
                     onChange={(e) => setCityName(e.target.value)}
                     required
                 />
-                
+
                 <div className="button-group">
                     <button type="submit">Add</button>
                     <button type="button" onClick={() => ref.current?.close()}>
