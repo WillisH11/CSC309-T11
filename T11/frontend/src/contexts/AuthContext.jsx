@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { createContext, useContext, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const AuthContext = createContext(null);
 
@@ -11,92 +11,80 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-
-    if (!token) {
-      setUser(null);
-      return;
-    }
-
-    const fetchUser = async () => {
+    const checkUser = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/user/me`, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${token}`,
-          },
+        const res = await fetch(`${BACKEND_URL}/api/user/me`, {
+          credentials: "include",
         });
 
         if (!res.ok) {
-          localStorage.removeItem("token");
           setUser(null);
           return;
         }
 
         const data = await res.json();
         setUser(data.user);
-      } catch (err) {
-        console.error("Failed to fetch user:", err);
-        localStorage.removeItem("token");
+      } catch {
         setUser(null);
       }
     };
 
-    fetchUser();
+    checkUser();
   }, []);
-
-  const logout = () => {
-    localStorage.removeItem("token");
-    setUser(null);
-    navigate("/");
-  };
 
   const login = async (username, password) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/login`, {
+      const res = await fetch(`${BACKEND_URL}/api/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ username, password }),
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        const error = await res.json();
-        return error.message;
+        return data.message;
       }
 
-      const data = await res.json();
-      const token = data.token;
-
-      localStorage.setItem("token", token);
-
-      const userRes = await fetch(`${BACKEND_URL}/user/me`, {
-        headers: { "Authorization": `Bearer ${token}` },
-      });
-
-      const userData = await userRes.json();
-      setUser(userData.user);
-
+      setUser(data.user);
       navigate("/profile");
-    } catch (err) {
+    } catch {
       return "Network error";
     }
   };
 
-  const register = async (userData) => {
+  const logout = async () => {
+    await fetch(`${BACKEND_URL}/api/logout`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    setUser(null);
+    navigate("/");
+  };
+
+  const register = async (form) => {
     try {
-      const res = await fetch(`${BACKEND_URL}/register`, {
+      const res = await fetch(`${BACKEND_URL}/api/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(userData),
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(form),
       });
 
+      const data = await res.json();
+
       if (!res.ok) {
-        const error = await res.json();
-        return error.message;
+        return data.message;
       }
 
       navigate("/success");
-    } catch (err) {
+    } catch {
       return "Network error";
     }
   };
